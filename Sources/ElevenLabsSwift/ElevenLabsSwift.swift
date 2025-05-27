@@ -1234,10 +1234,32 @@ public class ElevenLabsSDK {
         }
 
         /// Send a contextual update event
+        // non blocking, does not trigger a turn
         public func sendContextualUpdate(_ text: String) {
             let event: [String: Any] = [
                 "type": "contextual_update",
                 "text": text,
+            ]
+            sendWebSocketMessage(event)
+        }
+
+        /// Send a user message event
+        /// - Parameter text: The text message to send (optional)
+        // triggers a turn without requiring audio, audio still processed
+        public func sendUserMessage(_ text: String? = nil) {
+            var event: [String: Any] = [
+                "type": "user_message",
+            ]
+            if let text = text {
+                event["text"] = text
+            }
+            sendWebSocketMessage(event)
+        }
+
+        /// Send a user activity event , prevents interruption due to turn timeout
+        public func sendUserActivity() {
+            let event: [String: Any] = [
+                "type": "user_activity",
             ]
             sendWebSocketMessage(event)
         }
