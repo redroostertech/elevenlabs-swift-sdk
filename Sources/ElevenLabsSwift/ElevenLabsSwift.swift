@@ -666,7 +666,7 @@ public class ElevenLabsSDK {
         public var onStatusChange: @Sendable (Status) -> Void = { _ in }
         public var onModeChange: @Sendable (Mode) -> Void = { _ in }
         public var onVolumeUpdate: @Sendable (Float) -> Void = { _ in }
-        
+
         /// A callback that receives the updated RMS level of the output audio
         public var onOutputVolumeUpdate: @Sendable (Float) -> Void = { _ in }
 
@@ -783,21 +783,21 @@ public class ElevenLabsSDK {
                     self.updateMode(.listening)
                 }
             }
-            
+
             /// Installs a tap on the output to calculate and report the RMS audio level
             let intervalFrames = AVAudioFrameCount(Double(connection.sampleRate) * Constants.volumeUpdateInterval)
             output.mixer.installTap(onBus: 0, bufferSize: intervalFrames, format: output.audioFormat) { buffer, _ in
                 guard let floatChan = buffer.floatChannelData?[0] else { return }
                 let frameCount = Int(buffer.frameLength)
-                
+
                 // simple RMS
                 var sumSq: Float = 0
-                for i in 0..<frameCount {
+                for i in 0 ..< frameCount {
                     let s = floatChan[i]
                     sumSq += s * s
                 }
                 let rms = sqrt(sumSq / Float(frameCount))
-                
+
                 DispatchQueue.main.async {
                     self.callbacks.onOutputVolumeUpdate(rms)
                 }
@@ -878,7 +878,6 @@ public class ElevenLabsSDK {
 
                 switch result {
                 case let .success(message):
-
                     self.handleWebSocketMessage(message)
                 case let .failure(error):
                     self.logger.error("WebSocket error: \(error.localizedDescription)")
@@ -905,7 +904,6 @@ public class ElevenLabsSDK {
         private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
             switch message {
             case let .string(text):
-
                 guard let data = text.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String
@@ -1239,7 +1237,7 @@ public class ElevenLabsSDK {
         public func sendContextualUpdate(_ text: String) {
             let event: [String: Any] = [
                 "type": "contextual_update",
-                "text": text
+                "text": text,
             ]
             sendWebSocketMessage(event)
         }
