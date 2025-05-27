@@ -669,7 +669,7 @@ public class ElevenLabsSDK {
 
         /// A callback that receives the updated RMS level of the output audio
         public var onOutputVolumeUpdate: @Sendable (Float) -> Void = { _ in }
-      
+
         /// A callback that informs about a message correction.
         /// - Parameters:
         ///   - original: The original message. (Type: `String`)
