@@ -667,15 +667,15 @@ public class ElevenLabsSDK {
         public var onModeChange: @Sendable (Mode) -> Void = { _ in }
         public var onVolumeUpdate: @Sendable (Float) -> Void = { _ in }
 
+        /// A callback that receives the updated RMS level of the output audio
+        public var onOutputVolumeUpdate: @Sendable (Float) -> Void = { _ in }
+      
         /// A callback that informs about a message correction.
         /// - Parameters:
         ///   - original: The original message. (Type: `String`)
         ///   - corrected: The corrected message. (Type: `String`)
         ///   - role: The role associated with the correction. (Type: `Role`)
         public var onMessageCorrection: @Sendable (String, String, Role) -> Void = { _, _, _ in }
-        
-        /// A callback that receives the updated RMS level of the output audio
-        public var onOutputVolumeUpdate: @Sendable (Float) -> Void = { _ in }
 
         public init() {}
     }
