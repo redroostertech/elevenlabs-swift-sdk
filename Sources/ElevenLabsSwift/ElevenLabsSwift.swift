@@ -625,6 +625,7 @@ public class ElevenLabsSDK {
             engine.stop()
             // see AVAudioEngine documentation
             playerNode.stop()
+            mixer.removeTap(onBus: 0)
         }
 
         public func startPlaying() throws {
