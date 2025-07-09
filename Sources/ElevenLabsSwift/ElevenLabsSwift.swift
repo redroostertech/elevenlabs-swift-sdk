@@ -281,21 +281,24 @@ public class ElevenLabsSDK {
     public struct SessionConfig: Sendable {
         public let signedUrl: String?
         public let agentId: String?
+        public let userId: String?
         public let overrides: ConversationConfigOverride?
         public let customLlmExtraBody: [String: LlmExtraBodyValue]?
         public let dynamicVariables: [String: DynamicVariableValue]?
 
-        public init(signedUrl: String, overrides: ConversationConfigOverride? = nil, customLlmExtraBody: [String: LlmExtraBodyValue]? = nil, clientTools _: ClientTools = ClientTools(), dynamicVariables: [String: DynamicVariableValue]? = nil) {
+        public init(signedUrl: String, userId: String? = nil, overrides: ConversationConfigOverride? = nil, customLlmExtraBody: [String: LlmExtraBodyValue]? = nil, clientTools _: ClientTools = ClientTools(), dynamicVariables: [String: DynamicVariableValue]? = nil) {
             self.signedUrl = signedUrl
             agentId = nil
+            self.userId = userId
             self.overrides = overrides
             self.customLlmExtraBody = customLlmExtraBody
             self.dynamicVariables = dynamicVariables
         }
 
-        public init(agentId: String, overrides: ConversationConfigOverride? = nil, customLlmExtraBody: [String: LlmExtraBodyValue]? = nil, clientTools _: ClientTools = ClientTools(), dynamicVariables: [String: DynamicVariableValue]? = nil) {
+        public init(agentId: String, userId: String? = nil, overrides: ConversationConfigOverride? = nil, customLlmExtraBody: [String: LlmExtraBodyValue]? = nil, clientTools _: ClientTools = ClientTools(), dynamicVariables: [String: DynamicVariableValue]? = nil) {
             self.agentId = agentId
             signedUrl = nil
+            self.userId = userId
             self.overrides = overrides
             self.customLlmExtraBody = customLlmExtraBody
             self.dynamicVariables = dynamicVariables
