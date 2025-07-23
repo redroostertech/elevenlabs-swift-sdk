@@ -322,9 +322,10 @@ public class ElevenLabsSDK {
 
             let urlString: String
             if let signedUrl = config.signedUrl {
-                urlString = signedUrl
+                let separator = signedUrl.contains("?") ? "&" : "?"
+                urlString = "\(signedUrl)\(separator)source=swift_sdk&version=\(ElevenLabsSDK.version)"
             } else if let agentId = config.agentId {
-                urlString = "\(origin)\(pathname)\(agentId)"
+                urlString = "\(origin)\(pathname)\(agentId)&source=swift_sdk&version=\(ElevenLabsSDK.version)"
             } else {
                 throw ElevenLabsError.invalidConfiguration
             }
