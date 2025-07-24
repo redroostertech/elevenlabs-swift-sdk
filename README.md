@@ -153,24 +153,20 @@ private func handleToolCall(_ toolCall: ClientToolCallEvent) async {
     }
 }
 
-private func executeClientTool(name: String, parameters: [String: Any]) async -> [String: Any] {
+private func executeClientTool(name: String, parameters: [String: Any]) async -> String {
     switch name {
     case "get_weather":
         let location = parameters["location"] as? String ?? "Unknown"
-        return [
-            "location": location,
-            "temperature": "22°C",
-            "condition": "Sunny"
-        ]
+        return "Weather in \(location): 22°C, Sunny"
 
     case "get_time":
-        return [
-            "current_time": Date().ISO8601Format(),
-            "timezone": TimeZone.current.identifier
-        ]
+        return "Current time: \(Date().ISO8601Format())"
+
+    case "alert_tool":
+        return "User clicked something"
 
     default:
-        return ["error": "Unknown tool: \(name)"]
+        return "Unknown tool: \(name)"
     }
 }
 ```
@@ -189,13 +185,85 @@ let conversation = try await ElevenLabs.startConversation(
 #### Private Agents with Conversation Token
 
 ```swift
-// Get token from your backend (never store API keys in your app)
+// Option 1: Direct method (recommended)
+// Get a conversatoin token from your backend (never store API keys in your app)
 let token = try await fetchConversationToken()
 
+let conversation = try await ElevenLabs.startConversation(
+    conversationToken: token,
+    config: ConversationConfig()
+)
+
+// Option 2: Using auth configuration
 let conversation = try await ElevenLabs.startConversation(
     auth: .conversationToken(token),
     config: ConversationConfig()
 )
+```
+
+#### Complete Private Agent Example
+
+Here's a complete example showing how to fetch tokens and connect to private agents:
+
+```swift
+import Foundation
+
+// Token service for fetching conversation tokens
+actor TokenService {
+    private let apiKey: String
+    private let baseURL = "https://api.us.elevenlabs.io/v1/convai/conversation/token"
+
+    init(apiKey: String) {
+        self.apiKey = apiKey
+    }
+
+    func fetchConversationToken(for agentId: String) async throws -> String {
+        guard let url = URL(string: "\(baseURL)?agent_id=\(agentId)") else {
+            throw TokenServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw TokenServiceError.apiError
+        }
+
+        let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
+        return tokenResponse.token
+    }
+}
+
+struct TokenResponse: Codable {
+    let token: String
+}
+
+enum TokenServiceError: Error {
+    case invalidURL
+    case apiError
+}
+
+// Usage in your app
+class ConversationManager {
+    private let tokenService = TokenService(apiKey: "your-api-key")
+    private let agentId = "your-private-agent-id"
+
+    func startPrivateAgentConversation() async throws -> Conversation {
+        // Fetch token from ElevenLabs API
+        let token = try await tokenService.fetchConversationToken(for: agentId)
+
+        // Start conversation with private agent
+        return try await ElevenLabs.startConversation(
+            conversationToken: token,
+            config: ConversationConfig()
+        )
+    }
+}
 ```
 
 ### Voice and Text Modes
