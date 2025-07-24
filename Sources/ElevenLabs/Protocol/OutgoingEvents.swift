@@ -66,13 +66,24 @@ public struct ClientToolResultEvent: Sendable {
 
     public init(toolCallId: String, result: Any, isError: Bool = false) throws {
         self.toolCallId = toolCallId
-        resultData = try JSONSerialization.data(withJSONObject: result)
+        // Handle different result types appropriately for JSON serialization
+        if JSONSerialization.isValidJSONObject(result) {
+            resultData = try JSONSerialization.data(withJSONObject: result)
+        } else {
+            // For strings, numbers, bools, wrap in an array to make valid JSON
+            resultData = try JSONSerialization.data(withJSONObject: [result])
+        }
         self.isError = isError
     }
 
     /// Get result as Any (not Sendable, use carefully)
     public func getResult() throws -> Any {
-        try JSONSerialization.jsonObject(with: resultData)
+        let jsonObject = try JSONSerialization.jsonObject(with: resultData)
+        // If we wrapped a single value in an array, unwrap it
+        if let array = jsonObject as? [Any], array.count == 1 {
+            return array[0]
+        }
+        return jsonObject
     }
 }
 

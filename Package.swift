@@ -37,7 +37,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ElevenLabsTests",
-            dependencies: ["ElevenLabs"]
+            dependencies: [
+                "ElevenLabs",
+                .product(name: "LiveKit", package: "client-sdk-swift"),
+            ]
         ),
     ],
     swiftLanguageModes: [

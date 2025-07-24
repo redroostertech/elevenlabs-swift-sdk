@@ -1,5 +1,10 @@
 import Foundation
 
+enum EventParseError: Error {
+    case unknownEventType(String)
+    case invalidEventData
+}
+
 enum EventParser {
     /// Parse incoming JSON data into an IncomingEvent
     static func parseIncomingEvent(from data: Data) throws -> IncomingEvent? {
@@ -11,16 +16,12 @@ enum EventParser {
 
         switch type {
         case "user_transcript":
-            if let event = json["user_transcription_event"] as? [String: Any],
-               let transcript = event["user_transcript"] as? String
-            {
+            if let transcript = json["user_transcript"] as? String {
                 return .userTranscript(UserTranscriptEvent(transcript: transcript))
             }
 
         case "agent_response":
-            if let event = json["agent_response_event"] as? [String: Any],
-               let response = event["agent_response"] as? String
-            {
+            if let response = json["agent_response"] as? String {
                 return .agentResponse(AgentResponseEvent(response: response))
             }
 
@@ -32,15 +33,15 @@ enum EventParser {
             }
 
         case "audio":
-            if let event = json["audio_event"] as? [String: Any],
-               let audioBase64 = event["audio_base_64"] as? String,
+            if let event = json["audio"] as? [String: Any],
                let eventId = event["event_id"] as? Int
             {
+                let audioBase64 = event["audio_base_64"] as? String
                 return .audio(AudioEvent(audioBase64: audioBase64, eventId: eventId))
             }
 
         case "interruption":
-            if let event = json["interruption_event"] as? [String: Any],
+            if let event = json["interruption"] as? [String: Any],
                let eventId = event["event_id"] as? Int
             {
                 return .interruption(InterruptionEvent(eventId: eventId))
@@ -97,9 +98,9 @@ enum EventParser {
             }
 
         default:
-            return nil
+            throw EventParseError.unknownEventType(type)
         }
 
-        return nil
+        throw EventParseError.invalidEventData
     }
 }

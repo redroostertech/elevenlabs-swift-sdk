@@ -32,7 +32,7 @@ public struct AgentResponseCorrectionEvent: Sendable {
 
 /// Audio data from the agent
 public struct AudioEvent: Sendable {
-    public let audioBase64: String
+    public let audioBase64: String?
     public let eventId: Int
 }
 

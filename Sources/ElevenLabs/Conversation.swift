@@ -78,11 +78,29 @@ public final class Conversation: ObservableObject {
         self.deps = deps
 
         // Acquire token / connection details
-        let connDetails = try await deps.tokenService.fetchConnectionDetails(configuration: auth)
+        let connDetails: TokenService.ConnectionDetails
+        do {
+            connDetails = try await deps.tokenService.fetchConnectionDetails(configuration: auth)
+        } catch let error as TokenError {
+            // Convert TokenError to ConversationError
+            switch error {
+            case .authenticationFailed:
+                throw ConversationError.authenticationFailed(error.localizedDescription)
+            case let .httpError(statusCode):
+                throw ConversationError.authenticationFailed("HTTP error: \(statusCode)")
+            case .invalidURL, .invalidResponse, .invalidTokenResponse:
+                throw ConversationError.authenticationFailed(error.localizedDescription)
+            }
+        }
 
         // Connect room
-        try await deps.connectionManager.connect(details: connDetails,
-                                                 enableMic: !options.conversationOverrides.textOnly)
+        do {
+            try await deps.connectionManager.connect(details: connDetails,
+                                                     enableMic: !options.conversationOverrides.textOnly)
+        } catch {
+            // Convert connection errors to ConversationError
+            throw ConversationError.connectionFailed(error)
+        }
 
         // Wire up streams
         startRoomObservers()
@@ -128,7 +146,8 @@ public final class Conversation: ObservableObject {
     }
 
     public func setMuted(_ muted: Bool) async throws {
-        guard let room = deps?.connectionManager.room else { return }
+        guard state.isActive else { throw ConversationError.notConnected }
+        guard let room = deps?.connectionManager.room else { throw ConversationError.notConnected }
         do {
             try await room.localParticipant.setMicrophone(enabled: !muted)
             isMuted = muted

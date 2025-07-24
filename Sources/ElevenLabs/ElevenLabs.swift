@@ -175,6 +175,8 @@ public enum ElevenLabs {
     public typealias RemoteAudioTrack = LiveKit.RemoteAudioTrack
     public typealias AudioTrack = LiveKit.AudioTrack
 
+    // Language enum is already public and accessible as ElevenLabs.Language
+
     // MARK: - Internal Global State
 
     /// Internal container for global (process-wide) configuration.
