@@ -1,127 +1,407 @@
-# Elevenlabs Conversational AI Swift SDK
+# ElevenLabs Conversational AI Swift SDK
 
-![convai222](https://github.com/user-attachments/assets/ca4fa726-5e98-4bbc-91b2-d055e957df7d)
+![SwiftSDK](https://github.com/user-attachments/assets/b91ef903-ff1f-4dda-9822-a6afad3437fc)
 
-Elevenlabs Conversational AI Swift SDK is a framework designed to integrate ElevenLabs' powerful conversational AI capabilities into your Swift applications. Leverage advanced audio processing and seamless WebSocket communication to create interactive and intelligent conversational voice experiences.
+A Swift SDK for integrating ElevenLabs' conversational AI capabilities into your iOS and macOS applications. Built on top of LiveKit WebRTC for real-time audio streaming and communication.
 
-For detailed documentation, visit the [ElevenLabs Swift SDK documentation](https://elevenlabs.io/docs/conversational-ai/libraries/conversational-ai-sdk-swift).
+## Quick Start
 
-> [!NOTE]  
-> This library is launching to primarily support Conversational AI. The support for speech synthesis and other more generic use cases is planned for the future.
+### Installation
 
-## Install
+Add to your project using Swift Package Manager:
 
-Add the Elevenlabs Conversational AI Swift SDK to your project using Swift Package Manager:
+```swift
+dependencies: [
+    .package(url: "https://github.com/elevenlabs/elevenlabs-swift-sdk.git", from: "2.0.0")
+]
+```
 
-1. Open Your Project in Xcode
-   - Navigate to your project directory and open it in Xcode.
-2. Add Package Dependency
-   - Go to `File` > `Add Packages...`
-3. Enter Repository URL
-   - Input the following URL: `https://github.com/elevenlabs/ElevenLabsSwift`
-4. Select Version
-5. Import the SDK
-   ```swift
-   import ElevenLabsSDK
-   ```
-6. Ensure `NSMicrophoneUsageDescription` is added to your Info.plist to explain microphone access.
+### Basic Usage
 
-## Usage
+```swift
+import ElevenLabs
 
-### Setting Up a Conversation Session
+// 1. Start a conversation with your agent
+let conversation = try await ElevenLabs.startConversation(
+    agentId: "your-agent-id",
+    config: ConversationConfig()
+)
 
-1. Configure the Session
-   Create a `SessionConfig` with either an `agendId` or `signedUrl`.
+// 2. Observe conversation state and messages
+conversation.$state
+    .sink { state in
+        print("Connection state: \(state)")
+    }
+    .store(in: &cancellables)
 
-   ```swift
-   let config = ElevenLabsSDK.SessionConfig(agentId: "your-agent-id")
-   ```
+conversation.$messages
+    .sink { messages in
+        for message in messages {
+            print("\(message.role): \(message.content)")
+        }
+    }
+    .store(in: &cancellables)
 
-2. Define Callbacks
-   Implement callbacks to handle various conversation events.
+// 3. Send messages and control the conversation
+try await conversation.sendMessage("Hello!")
+try await conversation.toggleMute()
+await conversation.endConversation()
+```
 
-   ```swift
-   var callbacks = ElevenLabsSDK.Callbacks()
-   callbacks.onConnect = { conversationId in
-       print("Connected with ID: \(conversationId)")
-   }
-   callbacks.onMessage = { message, role in
-       print("\(role.rawValue): \(message)")
-   }
-   callbacks.onError = { error, info in
-       print("Error: \(error), Info: \(String(describing: info))")
-   }
-   callbacks.onStatusChange = { status in
-       print("Status changed to: \(status.rawValue)")
-   }
-   callbacks.onModeChange = { mode in
-       print("Mode changed to: \(mode.rawValue)")
-   }
-   ```
+### Requirements
 
-3. Start the Conversation
-   Initiate the conversation session asynchronously.
+- iOS 14.0+ / macOS 11.0+
+- Swift 5.9+
+- Add `NSMicrophoneUsageDescription` to your Info.plist
 
-   ```swift
-   Task {
-       do {
-           let conversation = try await ElevenLabsSDK.Conversation.startSession(config: config, callbacks: callbacks)
-           // Use the conversation instance as needed
-       } catch {
-           print("Failed to start conversation: \(error)")
-       }
-   }
-   ```
+## Core Features
 
-### Advanced Configuration
+### Real-time Conversation Management
 
-1. Using Client Tools
+The SDK provides a streamlined `Conversation` class that handles all aspects of real-time communication:
 
-   ```swift
-   var clientTools = ElevenLabsSDK.ClientTools()
-   clientTools.register("weather", handler: { async parameters throws -> String? in
-       print("Weather parameters received:", parameters)
-       ...
-   })
+```swift
+import ElevenLabs
 
-   let conversation = try await ElevenLabsSDK.Conversation.startSession(
-       config: config,
-       callbacks: callbacks,
-       clientTools: clientTools
-   )
-   ```
+@MainActor
+class ConversationManager: ObservableObject {
+    @Published var conversation: Conversation?
+    private var cancellables = Set<AnyCancellable>()
 
-2. Using Overrides
+    func startConversation(agentId: String) async throws {
+        let config = ConversationConfig(
+            conversationOverrides: ConversationOverrides(textOnly: false)
+        )
 
-   ```swift
-   let overrides = ElevenLabsSDK.ConversationConfigOverride(
-       agent: ElevenLabsSDK.AgentConfig(
-           prompt: ElevenLabsSDK.AgentPrompt(prompt: "You are a helpful assistant"),
-           language: .en
-       )
-   )
+        conversation = try await ElevenLabs.startConversation(
+            agentId: agentId,
+            config: config
+        )
 
-   let config = ElevenLabsSDK.SessionConfig(
-       agentId: "your-agent-id",
-       overrides: overrides
-   )
-   ```
+        setupObservers()
+    }
 
-### Manage the Session
+    private func setupObservers() {
+        guard let conversation else { return }
 
-- End Session
+        // Monitor connection state
+        conversation.$state
+            .sink { state in
+                print("State: \(state)")
+            }
+            .store(in: &cancellables)
 
-  ```swift
-  conversation.endSession()
-  ```
+        // Monitor messages
+        conversation.$messages
+            .sink { messages in
+                print("Messages: \(messages.count)")
+            }
+            .store(in: &cancellables)
 
-- Control Recording
+        // Monitor agent state
+        conversation.$agentState
+            .sink { agentState in
+                print("Agent: \(agentState)")
+            }
+            .store(in: &cancellables)
 
-  ```swift
-  conversation.startRecording()
-  conversation.stopRecording()
-  ```
+        // Handle client tool calls
+        conversation.$pendingToolCalls
+            .sink { toolCalls in
+                for toolCall in toolCalls {
+                    Task {
+                        await handleToolCall(toolCall)
+                    }
+                }
+            }
+            .store(in: &cancellables)
+    }
+}
+```
 
-## Example
+### Client Tool Support
 
-Explore examples in the [ElevenLabs Examples repository](https://github.com/elevenlabs/elevenlabs-examples/tree/main/examples/conversational-ai/swift).
+Handle tool calls from your agent with full parameter support:
+
+```swift
+private func handleToolCall(_ toolCall: ClientToolCallEvent) async {
+    do {
+        let parameters = try toolCall.getParameters()
+
+        let result = await executeClientTool(
+            name: toolCall.toolName,
+            parameters: parameters
+        )
+
+        if toolCall.expectsResponse {
+            try await conversation?.sendToolResult(
+                for: toolCall.toolCallId,
+                result: result
+            )
+        } else {
+            conversation?.markToolCallCompleted(toolCall.toolCallId)
+        }
+    } catch {
+        // Handle tool execution errors
+        if toolCall.expectsResponse {
+            try? await conversation?.sendToolResult(
+                for: toolCall.toolCallId,
+                result: ["error": error.localizedDescription],
+                isError: true
+            )
+        }
+    }
+}
+
+private func executeClientTool(name: String, parameters: [String: Any]) async -> [String: Any] {
+    switch name {
+    case "get_weather":
+        let location = parameters["location"] as? String ?? "Unknown"
+        return [
+            "location": location,
+            "temperature": "22°C",
+            "condition": "Sunny"
+        ]
+
+    case "get_time":
+        return [
+            "current_time": Date().ISO8601Format(),
+            "timezone": TimeZone.current.identifier
+        ]
+
+    default:
+        return ["error": "Unknown tool: \(name)"]
+    }
+}
+```
+
+### Authentication Methods
+
+#### Public Agents
+
+```swift
+let conversation = try await ElevenLabs.startConversation(
+    agentId: "your-public-agent-id",
+    config: ConversationConfig()
+)
+```
+
+#### Private Agents with Conversation Token
+
+```swift
+// Get token from your backend (never store API keys in your app)
+let token = try await fetchConversationToken()
+
+let conversation = try await ElevenLabs.startConversation(
+    auth: .conversationToken(token),
+    config: ConversationConfig()
+)
+```
+
+### Voice and Text Modes
+
+```swift
+// Voice conversation (default)
+let voiceConfig = ConversationConfig(
+    conversationOverrides: ConversationOverrides(textOnly: false)
+)
+
+// Text-only conversation
+let textConfig = ConversationConfig(
+    conversationOverrides: ConversationOverrides(textOnly: true)
+)
+
+let conversation = try await ElevenLabs.startConversation(
+    agentId: agentId,
+    config: textConfig
+)
+```
+
+### Audio Controls
+
+```swift
+// Microphone control
+try await conversation.toggleMute()
+try await conversation.setMuted(true)
+
+// Check microphone state
+let isMuted = conversation.isMuted
+
+// Access audio tracks for advanced use cases
+let inputTrack = conversation.inputTrack
+let agentAudioTrack = conversation.agentAudioTrack
+```
+
+## Architecture
+
+The SDK is built with modern Swift patterns and reactive programming:
+
+```
+ElevenLabs (Main Module)
+├── Conversation (Core conversation management)
+├── ConnectionManager (LiveKit WebRTC integration)
+├── DataChannelReceiver (Real-time message handling)
+├── EventParser/EventSerializer (Protocol implementation)
+├── TokenService (Authentication and connection details)
+└── Dependencies (Dependency injection container)
+```
+
+### Key Components
+
+- **Conversation**: Main class providing `@Published` properties for reactive UI updates
+- **ConnectionManager**: Manages LiveKit room connections and audio streaming
+- **DataChannelReceiver**: Handles incoming protocol events from ElevenLabs agents
+- **EventParser/EventSerializer**: Handles protocol event parsing and serialization
+- **ClientToolCallEvent**: Represents tool calls from agents with parameter extraction
+
+## Advanced Usage
+
+### Message Handling
+
+The SDK provides automatic message management with reactive updates:
+
+```swift
+conversation.$messages
+    .sink { messages in
+        // Update your UI with the latest messages
+        self.chatMessages = messages.map { message in
+            ChatMessage(
+                id: message.id,
+                content: message.content,
+                isFromAgent: message.role == .agent
+            )
+        }
+    }
+    .store(in: &cancellables)
+```
+
+### Agent State Monitoring
+
+```swift
+conversation.$agentState
+    .sink { state in
+        switch state {
+        case .listening:
+            // Agent is listening, show listening indicator
+            break
+        case .speaking:
+            // Agent is speaking, show speaking indicator
+            break
+        }
+    }
+    .store(in: &cancellables)
+```
+
+### Connection State Management
+
+```swift
+conversation.$state
+    .sink { state in
+        switch state {
+        case .idle:
+            // Not connected
+            break
+        case .connecting:
+            // Show connecting indicator
+            break
+        case .active(let callInfo):
+            // Connected to agent: \(callInfo.agentId)
+            break
+        case .ended(let reason):
+            // Handle disconnection: \(reason)
+            break
+        case .error(let error):
+            // Handle error: \(error)
+            break
+        }
+    }
+    .store(in: &cancellables)
+```
+
+### SwiftUI Integration
+
+```swift
+import SwiftUI
+import ElevenLabs
+import Combine
+
+struct ConversationView: View {
+    @StateObject private var viewModel = ConversationViewModel()
+
+    var body: some View {
+        VStack {
+            // Chat messages
+            ScrollView {
+                LazyVStack {
+                    ForEach(viewModel.messages) { message in
+                        MessageView(message: message)
+                    }
+                }
+            }
+
+            // Controls
+            HStack {
+                Button(viewModel.isConnected ? "End" : "Start") {
+                    Task {
+                        if viewModel.isConnected {
+                            await viewModel.endConversation()
+                        } else {
+                            await viewModel.startConversation()
+                        }
+                    }
+                }
+
+                Button(viewModel.isMuted ? "Unmute" : "Mute") {
+                    Task {
+                        await viewModel.toggleMute()
+                    }
+                }
+                .disabled(!viewModel.isConnected)
+            }
+        }
+        .task {
+            await viewModel.setup()
+        }
+    }
+}
+
+@MainActor
+class ConversationViewModel: ObservableObject {
+    @Published var messages: [Message] = []
+    @Published var isConnected = false
+    @Published var isMuted = false
+
+    private var conversation: Conversation?
+    private var cancellables = Set<AnyCancellable>()
+
+    func setup() async {
+        // Initialize your conversation manager
+    }
+
+    func startConversation() async {
+        do {
+            conversation = try await ElevenLabs.startConversation(
+                agentId: "your-agent-id",
+                config: ConversationConfig()
+            )
+            setupObservers()
+        } catch {
+            print("Failed to start conversation: \(error)")
+        }
+    }
+
+    private func setupObservers() {
+        guard let conversation else { return }
+
+        conversation.$messages
+            .assign(to: &$messages)
+
+        conversation.$state
+            .map { $0.isActive }
+            .assign(to: &$isConnected)
+
+        conversation.$isMuted
+            .assign(to: &$isMuted)
+    }
+}
+```
