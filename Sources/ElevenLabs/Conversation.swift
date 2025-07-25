@@ -95,8 +95,8 @@ public final class Conversation: ObservableObject {
 
         deps.connectionManager.onAgentReady = { [weak self, auth, options] in
             Task { @MainActor in
-                guard let self else { 
-                    return 
+                guard let self else {
+                    return
                 }
                 // send conversation init exactly when the agent appears
                 try? await self.sendConversationInit(config: options.toConversationConfig())
@@ -104,7 +104,7 @@ public final class Conversation: ObservableObject {
                 self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
             }
         }
-        
+
         deps.connectionManager.onAgentDisconnected = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -149,7 +149,9 @@ public final class Conversation: ObservableObject {
 
     /// Send a text message to the agent.
     public func sendMessage(_ text: String) async throws {
-        guard state.isActive else { throw ConversationError.notConnected }
+        guard state.isActive else {
+            throw ConversationError.notConnected
+        }
         let event = OutgoingEvent.userMessage(UserMessageEvent(text: text))
         try await publish(event)
         appendLocalMessage(text)
@@ -303,7 +305,6 @@ public final class Conversation: ObservableObject {
         case let .tentativeAgentResponse(e):
             agentState = .speaking
             scheduleBackToListening()
-            appendTentativeAgent(e.tentativeResponse)
 
         case let .agentResponse(e):
             agentState = .speaking
@@ -348,7 +349,6 @@ public final class Conversation: ObservableObject {
                 case let .tentativeAgentResponse(e):
                     agentState = .speaking
                     scheduleBackToListening()
-                    appendTentativeAgent(e.tentativeResponse)
 
                 case let .agentResponse(e):
                     agentState = .speaking

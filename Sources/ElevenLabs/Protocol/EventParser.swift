@@ -16,12 +16,16 @@ enum EventParser {
 
         switch type {
         case "user_transcript":
-            if let transcript = json["user_transcript"] as? String {
+            if let event = json["user_transcription_event"] as? [String: Any],
+               let transcript = event["user_transcript"] as? String
+            {
                 return .userTranscript(UserTranscriptEvent(transcript: transcript))
             }
 
         case "agent_response":
-            if let response = json["agent_response"] as? String {
+            if let event = json["agent_response_event"] as? [String: Any],
+               let response = event["agent_response"] as? String
+            {
                 return .agentResponse(AgentResponseEvent(response: response))
             }
 
