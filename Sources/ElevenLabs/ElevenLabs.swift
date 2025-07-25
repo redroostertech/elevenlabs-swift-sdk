@@ -180,9 +180,9 @@ public enum ElevenLabs {
     // MARK: - Internal Global State
 
     /// Internal container for global (process-wide) configuration.
-    /// This mimics the old `Dependencies` singleton but keeps it private.
+    /// This mimics the old `Dependencies` singleton but keeps it internal.
     @MainActor
-    fileprivate final class Global {
+    final class Global {
         static let shared = Global()
         var configuration: Configuration = .default
         private init() {}
@@ -195,14 +195,17 @@ public extension ElevenLabs {
     /// Global SDK configuration.
     struct Configuration: Sendable {
         public var apiEndpoint: URL?
+        public var websocketUrl: String?
         public var logLevel: LogLevel
         public var debugMode: Bool
 
         public init(apiEndpoint: URL? = nil,
+                    websocketUrl: String? = nil,
                     logLevel: LogLevel = .warning,
                     debugMode: Bool = false)
         {
             self.apiEndpoint = apiEndpoint
+            self.websocketUrl = websocketUrl
             self.logLevel = logLevel
             self.debugMode = debugMode
         }

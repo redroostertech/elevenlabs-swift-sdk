@@ -18,7 +18,15 @@ final class Dependencies {
 
     // MARK: Services
 
-    lazy var tokenService = TokenService()
+    lazy var tokenService: TokenService = {
+        let globalConfig = ElevenLabs.Global.shared.configuration
+        let tokenServiceConfig = TokenService.Configuration(
+            apiEndpoint: globalConfig.apiEndpoint?.absoluteString,
+            websocketURL: globalConfig.websocketUrl
+        )
+        return TokenService(configuration: tokenServiceConfig)
+    }()
+
     lazy var connectionManager = ConnectionManager()
 
     private lazy var localMessageSender = LocalMessageSender(room: room)
