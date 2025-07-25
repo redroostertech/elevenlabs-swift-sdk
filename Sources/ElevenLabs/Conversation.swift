@@ -95,8 +95,8 @@ public final class Conversation: ObservableObject {
 
         deps.connectionManager.onAgentReady = { [weak self, auth, options] in
             Task { @MainActor in
-                guard let self else { 
-                    return 
+                guard let self else {
+                    return
                 }
                 // send conversation init exactly when the agent appears
                 try? await self.sendConversationInit(config: options.toConversationConfig())
@@ -104,7 +104,7 @@ public final class Conversation: ObservableObject {
                 self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
             }
         }
-        
+
         deps.connectionManager.onAgentDisconnected = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -512,18 +512,21 @@ public struct ConversationOptions: Sendable {
     public var ttsOverrides: TTSOverrides?
     public var customLlmExtraBody: [String: String]? // Simplified to be Sendable
     public var dynamicVariables: [String: String]? // Simplified to be Sendable
+    public var userId: String?
 
     public init(conversationOverrides: ConversationOverrides = .init(),
                 agentOverrides: AgentOverrides? = nil,
                 ttsOverrides: TTSOverrides? = nil,
                 customLlmExtraBody: [String: String]? = nil,
-                dynamicVariables: [String: String]? = nil)
+                dynamicVariables: [String: String]? = nil,
+                userId: String? = nil)
     {
         self.conversationOverrides = conversationOverrides
         self.agentOverrides = agentOverrides
         self.ttsOverrides = ttsOverrides
         self.customLlmExtraBody = customLlmExtraBody
         self.dynamicVariables = dynamicVariables
+        self.userId = userId
     }
 
     public static let `default` = ConversationOptions()
