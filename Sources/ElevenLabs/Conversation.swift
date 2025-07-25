@@ -93,6 +93,28 @@ public final class Conversation: ObservableObject {
             }
         }
 
+        deps.connectionManager.onAgentReady = { [weak self, auth, options] in
+            Task { @MainActor in
+                guard let self else { 
+                    return 
+                }
+                // send conversation init exactly when the agent appears
+                try? await self.sendConversationInit(config: options.toConversationConfig())
+                // flip to .active once conversation init is sent
+                self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
+            }
+        }
+        
+        deps.connectionManager.onAgentDisconnected = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.state.isActive {
+                    self.state = .ended(reason: .remoteDisconnected)
+                    self.resetFlags()
+                }
+            }
+        }
+
         // Connect room
         do {
             try await deps.connectionManager.connect(details: connDetails,
@@ -105,13 +127,6 @@ public final class Conversation: ObservableObject {
         // Wire up streams
         startRoomObservers()
         startProtocolEventLoop()
-
-        // Send conversation init to ElevenLabs
-        try await sendConversationInit(config: options.toConversationConfig())
-
-        // Extract agent ID for state tracking
-        let agentId = extractAgentId(from: auth)
-        state = .active(.init(agentId: agentId))
     }
 
     /// Extract agent ID from authentication configuration for state tracking
