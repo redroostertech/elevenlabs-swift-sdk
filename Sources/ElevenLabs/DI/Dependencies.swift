@@ -30,20 +30,11 @@ final class Dependencies {
     lazy var connectionManager = ConnectionManager()
 
     private lazy var localMessageSender = LocalMessageSender(room: room)
-    private lazy var dataChannelReceiver: any MessageReceiver = {
-        if #available(macOS 11.0, iOS 14.0, *) {
-            return DataChannelReceiver(room: room)
-        } else {
-            // Fallback for older OS versions - could implement a simple receiver
-            return localMessageSender
-        }
-    }()
 
     lazy var messageSenders: [any MessageSender] = [
         localMessageSender,
     ]
     lazy var messageReceivers: [any MessageReceiver] = [
-        dataChannelReceiver, // Primary receiver for ElevenLabs messages
         TranscriptionStreamReceiver(room: room), // Keep for audio transcriptions
         localMessageSender, // Keep for loopback messages
     ]

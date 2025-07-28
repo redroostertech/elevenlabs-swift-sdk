@@ -51,6 +51,13 @@ enum EventParser {
                 return .interruption(InterruptionEvent(eventId: eventId))
             }
 
+        case "vad_score":
+            if let event = json["vad_score_event"] as? [String: Any],
+               let vadScore = event["vad_score"] as? Double
+            {
+                return .vadScore(VadScoreEvent(vadScore: vadScore))
+            }
+
         case "internal_tentative_agent_response":
             if let event = json["tentative_agent_response_internal_event"] as? [String: Any],
                let response = event["tentative_agent_response"] as? String

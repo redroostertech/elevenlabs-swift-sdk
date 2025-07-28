@@ -18,15 +18,15 @@ class ConnectionManager {
         _room = room
 
         let rd = ReadyDelegate(
-            onReady: { [weak self] in self?.onAgentReady?() },
+            onReady: { [weak self] in
+                self?.onAgentReady?()
+            },
             onDisconnected: { [weak self] in self?.onAgentDisconnected?() }
         )
         readyDelegate = rd // Keep strong reference
         room.add(delegate: rd)
 
-        let (_, continuation) = AsyncStream<Data>.makeStream()
-        room.add(delegate: DataChannelDelegate(continuation: continuation))
-
+        // Note: DataChannelDelegate removed - now using DataChannelReceiver from Dependencies
         try await room.connect(url: details.serverUrl, token: details.participantToken)
 
         if enableMic {
@@ -49,21 +49,22 @@ class ConnectionManager {
         }
 
         return AsyncStream { continuation in
-            // Set up data received handler
             room.add(delegate: DataChannelDelegate(continuation: continuation))
 
-            // Keep the stream alive
             continuation.onTermination = { _ in
                 // Stream terminated
             }
         }
     }
 
-    /// Minimal delegate: triggers once on `participantDidConnect` and handles disconnection.
+    /// Enhanced delegate: waits for agent track subscription before triggering ready.
     private final class ReadyDelegate: RoomDelegate, @unchecked Sendable {
         private var agentConnected = false
+        private var agentTrackSubscribed = false
+        private var timeoutTask: Task<Void, Never>?
         private let onReady: () -> Void
         private let onDisconnected: () -> Void
+        private let timeoutDuration: TimeInterval = 10.0 // 10 second timeout
 
         init(onReady: @escaping () -> Void, onDisconnected: @escaping () -> Void) {
             self.onReady = onReady
@@ -71,28 +72,82 @@ class ConnectionManager {
         }
 
         func room(_: Room, participantDidConnect _: RemoteParticipant) {
+            let timestamp = Date()
             guard !agentConnected else {
                 return
             }
+
+            // Only mark as connected, don't call onReady yet
             agentConnected = true
-            onReady()
+            startTimeoutTimer()
+            checkAgentReady()
         }
 
         func room(_ room: Room, participantDidDisconnect _: RemoteParticipant) {
             if agentConnected, room.remoteParticipants.isEmpty {
+                print("[ConnectionManager] All participants disconnected, resetting agent state")
+                cancelTimeoutTimer()
                 agentConnected = false
+                agentTrackSubscribed = false
                 onDisconnected()
             }
         }
 
         func roomDidConnect(_ room: Room) {
+            let timestamp = Date()
+
             // Check if agent is already in the room
             if !agentConnected, !room.remoteParticipants.isEmpty {
-                print("[ElevenLabs] ConnectionManager: Agent already in room at connection time")
+                for (_, participant) in room.remoteParticipants {
+                    // Check if agent already has tracks published
+                    if !participant.audioTracks.isEmpty {
+                        agentTrackSubscribed = true
+                    }
+                }
                 agentConnected = true
-                print("[ElevenLabs] ConnectionManager: Marking agent as connected and calling onReady()")
-                onReady()
+                startTimeoutTimer()
+                checkAgentReady()
+            } else {
+                print("[ConnectionManager] No agent in room yet, waiting for participantDidConnect")
             }
+        }
+
+        func room(_: Room, participant _: RemoteParticipant, didSubscribeToTrack publication: RemoteTrackPublication) {
+            // Only trigger for agent audio tracks
+            if publication.kind == .audio, agentConnected, !agentTrackSubscribed {
+                agentTrackSubscribed = true
+                print("[ConnectionManager] Agent audio track subscribed, checking readiness...")
+                checkAgentReady()
+            } else {
+                print("[ConnectionManager] Track ignored - not agent audio or already processed")
+            }
+        }
+
+        private func checkAgentReady() {
+            if agentConnected, agentTrackSubscribed {
+                cancelTimeoutTimer()
+                onReady()
+            } else {
+                print("[ConnectionManager] Agent not fully ready yet, waiting...")
+            }
+        }
+
+        private func startTimeoutTimer() {
+            cancelTimeoutTimer()
+            timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutDuration * 1_000_000_000))
+                if !Task.isCancelled && agentConnected && !agentTrackSubscribed {
+                    print("[ConnectionManager] Timeout waiting for agent track, proceeding anyway")
+                    // Proceed even without track subscription to prevent indefinite waiting
+                    agentTrackSubscribed = true
+                    checkAgentReady()
+                }
+            }
+        }
+
+        private func cancelTimeoutTimer() {
+            timeoutTask?.cancel()
+            timeoutTask = nil
         }
 
         func room(_: Room, didUpdate _: ConnectionState, from _: ConnectionState) {}

@@ -106,19 +106,22 @@ public struct TokenService: Sendable {
 
     /// Fetch connection details for ElevenLabs conversation
     public func fetchConnectionDetails(configuration: ElevenLabsConfiguration) async throws -> ConnectionDetails {
-        let token: String = switch configuration.authSource {
+        let token: String
+        switch configuration.authSource {
         case let .publicAgentId(agentId):
-            try await fetchTokenFromAPI(agentId: agentId)
+            token = try await fetchTokenFromAPI(agentId: agentId)
         case let .conversationToken(conversationToken):
-            conversationToken
+            token = conversationToken
         case let .customTokenProvider(provider):
-            try await provider()
+            token = try await provider()
         }
+
+        let websocketURL = self.configuration.websocketURL ?? ConnectionConstants.wssUrl
 
         // ElevenLabs tokens contain room name and participant identity in the JWT
         // LiveKit will extract these automatically, so we provide empty values
         return ConnectionDetails(
-            serverUrl: self.configuration.websocketURL ?? ConnectionConstants.wssUrl,
+            serverUrl: websocketURL,
             roomName: "", // LiveKit extracts from JWT
             participantName: "", // LiveKit extracts from JWT
             participantToken: token,
@@ -128,6 +131,7 @@ public struct TokenService: Sendable {
     private func fetchTokenFromAPI(agentId: String) async throws -> String {
         // Build URL with agent ID as query parameter
         let apiUrl = configuration.apiEndpoint ?? ConnectionConstants.tokenUrl
+
         var components = URLComponents(string: apiUrl)!
         components.queryItems = [
             URLQueryItem(name: "agent_id", value: agentId),

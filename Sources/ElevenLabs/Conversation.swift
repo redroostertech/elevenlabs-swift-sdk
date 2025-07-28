@@ -98,10 +98,21 @@ public final class Conversation: ObservableObject {
                 guard let self else {
                     return
                 }
-                // send conversation init exactly when the agent appears
-                try? await self.sendConversationInit(config: options.toConversationConfig())
+
+                // Add minimal delay as safety buffer
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms delay
+
+                // Cancel any existing init attempt
+                self.conversationInitTask?.cancel()
+                self.conversationInitTask = Task {
+                    await self.sendConversationInitWithRetry(config: options.toConversationConfig())
+                }
+                await self.conversationInitTask?.value
+                print("[ElevenLabs] Conversation init completed")
+
                 // flip to .active once conversation init is sent
                 self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
+                print("[ElevenLabs] State changed to active")
             }
         }
 
@@ -218,11 +229,13 @@ public final class Conversation: ObservableObject {
     private var speakingTimer: Task<Void, Never>?
     private var roomChangesTask: Task<Void, Never>?
     private var protocolEventsTask: Task<Void, Never>?
+    private var conversationInitTask: Task<Void, Never>?
 
     private func resetFlags() {
         isMuted = false
         agentState = .listening
         pendingToolCalls.removeAll()
+        conversationInitTask?.cancel()
     }
 
     private func observeDeviceChanges() {
@@ -275,23 +288,18 @@ public final class Conversation: ObservableObject {
                 return
             }
 
-            // Use DataChannelReceiver directly instead of ConnectionManager stream
-            guard let room = deps.connectionManager.room else {
-                return
-            }
+            let room = deps.connectionManager.room
 
-            if #available(macOS 11.0, iOS 14.0, *) {
-                let dataChannelReceiver = DataChannelReceiver(room: room)
-                let eventStream = await dataChannelReceiver.events()
-                for await event in eventStream {
-                    await handleIncomingEvent(event)
+            // Set up our own delegate to listen for data
+            let delegate = ConversationDataDelegate { [weak self] data in
+                Task { @MainActor in
+                    await self?.handleIncomingData(data)
                 }
-            } else {
-                // Fallback to original ConnectionManager approach for older OS versions
-                let stream = deps.connectionManager.dataEventsStream()
-                for await data in stream {
-                    await handleIncomingData(data)
-                }
+            }
+            room?.add(delegate: delegate)
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             }
         }
     }
@@ -333,6 +341,10 @@ public final class Conversation: ObservableObject {
         case let .clientToolCall(toolCall):
             // Add to pending tool calls for the app to handle
             pendingToolCalls.append(toolCall)
+
+        case let .vadScore(vadScoreEvent):
+            // VAD scores are available in the event stream
+            break
         }
     }
 
@@ -340,49 +352,15 @@ public final class Conversation: ObservableObject {
         guard deps != nil else { return }
         do {
             if let event = try EventParser.parseIncomingEvent(from: data) {
-                switch event {
-                case let .userTranscript(e):
-                    agentState = .listening
-                    // optional: update transcription state
-                    appendUserTranscript(e.transcript)
-
-                case let .tentativeAgentResponse(e):
-                    agentState = .speaking
-                    scheduleBackToListening()
-
-                case let .agentResponse(e):
-                    agentState = .speaking
-                    scheduleBackToListening()
-                    appendAgentMessage(e.response)
-
-                case .agentResponseCorrection:
-                    // TODO: Handle agent response corrections
-                    break
-
-                case .audio:
-                    agentState = .speaking
-                    scheduleBackToListening(delay: 0.8)
-
-                case .interruption:
-                    agentState = .listening
-
-                case .conversationMetadata:
-                    agentState = .listening
-
-                case let .ping(p):
-                    // respond
-                    let pong = OutgoingEvent.pong(PongEvent(eventId: p.eventId))
-                    try await publish(pong)
-
-                case .clientToolCall:
-                    // surface to client via Combine/stream later; omitted here
-                    break
-                }
-            } else {
-                // swallow parsing errors for now or surface via a delegate/stream
+                await handleIncomingEvent(event)
             }
         } catch {
-            // swallow parsing errors for now or surface via a delegate/stream
+            print("❌ [Conversation] Failed to parse incoming event: \(error)")
+            if let dataString = String(data: data, encoding: .utf8) {
+                print("❌ [Conversation] Raw data: \(dataString)")
+            } else {
+                print("❌ [Conversation] Raw data (non-UTF8): \(data.count) bytes")
+            }
         }
     }
 
@@ -414,6 +392,30 @@ public final class Conversation: ObservableObject {
     private func sendConversationInit(config: ConversationConfig) async throws {
         let initEvent = ConversationInitEvent(config: config)
         try await publish(.conversationInit(initEvent))
+    }
+
+    private func sendConversationInitWithRetry(config: ConversationConfig, maxAttempts: Int = 3) async {
+        for attempt in 1 ... maxAttempts {
+            // Exponential backoff: 0, 0.5, 1.0 seconds
+            if attempt > 1 {
+                let delay = pow(2.0, Double(attempt - 2)) * 0.5 // 0.5, 1.0 seconds
+                print("[Retry] Attempt \(attempt) of \(maxAttempts), exponential backoff delay: \(delay)s")
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } else {
+                print("[Retry] Attempt \(attempt) of \(maxAttempts), no delay")
+            }
+
+            do {
+                try await sendConversationInit(config: config)
+                print("[Retry] ✅ Conversation init succeeded on attempt \(attempt)")
+                return
+            } catch {
+                print("[Retry] ❌ Attempt \(attempt) failed: \(error.localizedDescription)")
+                if attempt == maxAttempts {
+                    print("[Retry] ❌ All attempts exhausted, conversation init failed")
+                }
+            }
+        }
     }
 
     // MARK: - Message Helpers
@@ -453,6 +455,20 @@ public final class Conversation: ObservableObject {
                     content: text,
                     timestamp: Date())
         )
+    }
+}
+
+// MARK: - Simple Data Delegate
+
+private final class ConversationDataDelegate: RoomDelegate, @unchecked Sendable {
+    private let onData: (Data) -> Void
+
+    init(onData: @escaping (Data) -> Void) {
+        self.onData = onData
+    }
+
+    func room(_: Room, participant _: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
+        onData(data)
     }
 }
 

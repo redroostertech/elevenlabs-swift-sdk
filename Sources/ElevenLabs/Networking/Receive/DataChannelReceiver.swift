@@ -67,8 +67,10 @@ actor DataChannelReceiver: MessageReceiver {
 extension DataChannelReceiver: RoomDelegate {
     nonisolated func room(_: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
         // Only process messages from the agent
-        guard let participant, participant.isAgent else { return }
-
+        guard let participant else {
+            print("[DataChannelReceiver] Received data but no participant, ignoring")
+            return
+        }
         Task {
             await handleDataMessage(data)
         }
@@ -93,6 +95,9 @@ extension DataChannelReceiver: RoomDelegate {
 
             case let .interruption(interruptionEvent):
                 handleInterruption(interruptionEvent)
+
+            case let .vadScore(vadScoreEvent):
+                handleVadScore(vadScoreEvent)
 
             case let .tentativeAgentResponse(tentativeEvent):
                 handleTentativeAgentResponse(tentativeEvent)
@@ -150,6 +155,11 @@ extension DataChannelReceiver: RoomDelegate {
     private func handleInterruption(_ event: InterruptionEvent) {
         logger.info("User interrupted the agent (event ID: \(event.eventId))")
         // Interruptions don't generate messages, but are available in the event stream
+    }
+
+    private func handleVadScore(_ event: VadScoreEvent) {
+        logger.info("VAD score: \(event.vadScore)")
+        // VAD scores are available in the event stream
     }
 
     private func handleTentativeAgentResponse(_ event: TentativeAgentResponseEvent) {

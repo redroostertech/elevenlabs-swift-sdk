@@ -9,6 +9,7 @@ public enum IncomingEvent: Sendable {
     case agentResponseCorrection(AgentResponseCorrectionEvent)
     case audio(AudioEvent)
     case interruption(InterruptionEvent)
+    case vadScore(VadScoreEvent)
     case tentativeAgentResponse(TentativeAgentResponseEvent)
     case conversationMetadata(ConversationMetadataEvent)
     case ping(PingEvent)
@@ -51,6 +52,11 @@ public struct ConversationMetadataEvent: Sendable {
     public let conversationId: String
     public let agentOutputAudioFormat: String
     public let userInputAudioFormat: String?
+}
+
+/// VAD score
+public struct VadScoreEvent: Sendable {
+    public let vadScore: Double
 }
 
 /// Ping event for connection health
