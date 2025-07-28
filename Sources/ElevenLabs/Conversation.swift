@@ -11,7 +11,7 @@ import Foundation
 import LiveKit
 
 @MainActor
-public final class Conversation: ObservableObject {
+public final class Conversation: ObservableObject, RoomDelegate {
     // MARK: - Public State
 
     @Published public private(set) var state: ConversationState = .idle
@@ -259,7 +259,15 @@ public final class Conversation: ObservableObject {
         roomChangesTask?.cancel()
         roomChangesTask = Task { [weak self] in
             guard let self else { return }
-            // For now, just update once - in a real implementation this would listen to room events
+
+            // Add ourselves as room delegate to monitor speaking state
+            room.add(delegate: self)
+
+            // Monitor existing remote participants
+            for participant in room.remoteParticipants.values {
+                participant.add(delegate: self)
+            }
+
             updateFromRoom(room)
         }
     }
@@ -307,16 +315,15 @@ public final class Conversation: ObservableObject {
     private func handleIncomingEvent(_ event: IncomingEvent) async {
         switch event {
         case let .userTranscript(e):
-            agentState = .listening
+            // Don't change agent state - let voice activity detection handle it
             appendUserTranscript(e.transcript)
 
         case let .tentativeAgentResponse(e):
-            agentState = .speaking
-            scheduleBackToListening()
+            // Don't change agent state - let voice activity detection handle it
+            break
 
         case let .agentResponse(e):
-            agentState = .speaking
-            scheduleBackToListening()
+            // Don't change agent state - let voice activity detection handle it
             appendAgentMessage(e.response)
 
         case .agentResponseCorrection:
@@ -324,14 +331,17 @@ public final class Conversation: ObservableObject {
             break
 
         case .audio:
-            agentState = .speaking
-            scheduleBackToListening(delay: 0.8)
+            // Don't change agent state - let voice activity detection handle it
+            break
 
         case .interruption:
+            // Only interruption should force listening state - immediately, no timeout
+            speakingTimer?.cancel()
             agentState = .listening
 
         case .conversationMetadata:
-            agentState = .listening
+            // Don't change agent state on metadata
+            break
 
         case let .ping(p):
             // Respond to ping with pong
@@ -455,6 +465,48 @@ public final class Conversation: ObservableObject {
                     content: text,
                     timestamp: Date())
         )
+    }
+}
+
+// MARK: - RoomDelegate
+
+public extension Conversation {
+    nonisolated func room(_: Room, participant: Participant, didUpdateIsSpeaking isSpeaking: Bool) {
+        if participant is RemoteParticipant {
+            Task { @MainActor in
+                if isSpeaking {
+                    // Immediately switch to speaking and cancel any pending timeout
+                    self.speakingTimer?.cancel()
+                    self.agentState = .speaking
+                } else {
+                    // Add timeout before switching to listening to handle natural speech gaps
+                    self.scheduleBackToListening(delay: 1.0) // 1 second delay for natural gaps
+                }
+            }
+        }
+    }
+
+    nonisolated func room(_: Room, participantDidJoin participant: RemoteParticipant) {
+        participant.add(delegate: self)
+    }
+}
+
+// MARK: - ParticipantDelegate
+
+extension Conversation: ParticipantDelegate {
+    public nonisolated func participant(_ participant: Participant, didUpdateIsSpeaking isSpeaking: Bool) {
+        if participant is RemoteParticipant {
+            Task { @MainActor in
+                if isSpeaking {
+                    // Immediately switch to speaking and cancel any pending timeout
+                    self.speakingTimer?.cancel()
+                    self.agentState = .speaking
+                } else {
+                    // Add timeout before switching to listening to handle natural speech gaps
+                    self.scheduleBackToListening(delay: 1.0) // 1 second delay for natural gaps
+                }
+            }
+        }
     }
 }
 

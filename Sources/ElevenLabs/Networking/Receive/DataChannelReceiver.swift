@@ -136,10 +136,10 @@ extension DataChannelReceiver: RoomDelegate {
         let message = ReceivedMessage(
             id: UUID().uuidString,
             timestamp: Date(),
-            content: .agentTranscript(event.correctedUpTo),
+            content: .agentTranscript(event.correctedAgentResponse),
         )
         yield(message: message)
-        logger.debug("Agent correction: \(event.correctedUpTo)")
+        logger.debug("Agent correction: \(event.originalAgentResponse) -> \(event.correctedAgentResponse)")
     }
 
     private func handleUserTranscript(_ event: UserTranscriptEvent) {

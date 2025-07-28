@@ -28,7 +28,8 @@ public struct AgentResponseEvent: Sendable {
 
 /// Agent's response correction
 public struct AgentResponseCorrectionEvent: Sendable {
-    public let correctedUpTo: String
+    public let originalAgentResponse: String
+    public let correctedAgentResponse: String
 }
 
 /// Audio data from the agent

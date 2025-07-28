@@ -31,9 +31,13 @@ enum EventParser {
 
         case "agent_response_correction":
             if let event = json["agent_response_correction_event"] as? [String: Any],
-               let correctedUpTo = event["corrected_up_to"] as? String
+               let originalResponse = event["original_agent_response"] as? String,
+               let correctedResponse = event["corrected_agent_response"] as? String
             {
-                return .agentResponseCorrection(AgentResponseCorrectionEvent(correctedUpTo: correctedUpTo))
+                return .agentResponseCorrection(AgentResponseCorrectionEvent(
+                    originalAgentResponse: originalResponse,
+                    correctedAgentResponse: correctedResponse
+                ))
             }
 
         case "audio":
@@ -45,7 +49,7 @@ enum EventParser {
             }
 
         case "interruption":
-            if let event = json["interruption"] as? [String: Any],
+            if let event = json["interruption_event"] as? [String: Any],
                let eventId = event["event_id"] as? Int
             {
                 return .interruption(InterruptionEvent(eventId: eventId))
