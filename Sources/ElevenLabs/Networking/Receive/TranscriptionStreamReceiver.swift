@@ -126,7 +126,7 @@ actor TranscriptionStreamReceiver: MessageReceiver {
             partialMessages[partialID] = PartialMessage(
                 content: updatedContent,
                 timestamp: timestamp,
-                streamID: currentStreamID,
+                streamID: currentStreamID
             )
             cleanupPreviousTurn(participantIdentity, exceptSegmentID: segmentID)
         }
@@ -139,7 +139,7 @@ actor TranscriptionStreamReceiver: MessageReceiver {
         let newOrUpdatedMessage = ReceivedMessage(
             id: segmentID,
             timestamp: timestamp,
-            content: participantIdentity == room.localParticipant.identity ? .userTranscript(updatedContent) : .agentTranscript(updatedContent),
+            content: participantIdentity == room.localParticipant.identity ? .userTranscript(updatedContent) : .agentTranscript(updatedContent)
         )
 
         return newOrUpdatedMessage

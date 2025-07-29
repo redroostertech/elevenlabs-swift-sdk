@@ -124,7 +124,7 @@ extension DataChannelReceiver: RoomDelegate {
         let message = ReceivedMessage(
             id: UUID().uuidString,
             timestamp: Date(),
-            content: .agentTranscript(event.response),
+            content: .agentTranscript(event.response)
         )
         yield(message: message)
         logger.debug("Agent response: \(event.response)")
@@ -136,7 +136,7 @@ extension DataChannelReceiver: RoomDelegate {
         let message = ReceivedMessage(
             id: UUID().uuidString,
             timestamp: Date(),
-            content: .agentTranscript(event.correctedAgentResponse),
+            content: .agentTranscript(event.correctedAgentResponse)
         )
         yield(message: message)
         logger.debug("Agent correction: \(event.originalAgentResponse) -> \(event.correctedAgentResponse)")
@@ -146,7 +146,7 @@ extension DataChannelReceiver: RoomDelegate {
         let message = ReceivedMessage(
             id: UUID().uuidString,
             timestamp: Date(),
-            content: .userTranscript(event.transcript),
+            content: .userTranscript(event.transcript)
         )
         yield(message: message)
         logger.debug("User transcript: \(event.transcript)")

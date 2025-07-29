@@ -79,7 +79,7 @@ enum EventParser {
                     ConversationMetadataEvent(
                         conversationId: conversationId,
                         agentOutputAudioFormat: agentFormat,
-                        userInputAudioFormat: userFormat,
+                        userInputAudioFormat: userFormat
                     ))
             }
 
@@ -107,7 +107,7 @@ enum EventParser {
                             toolName: toolName,
                             toolCallId: toolCallId,
                             parametersData: parametersData,
-                            expectsResponse: expectsResponse,
+                            expectsResponse: expectsResponse
                         ))
                 }
             }
