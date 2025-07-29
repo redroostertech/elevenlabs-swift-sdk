@@ -124,7 +124,7 @@ public struct TokenService: Sendable {
             serverUrl: websocketURL,
             roomName: "", // LiveKit extracts from JWT
             participantName: "", // LiveKit extracts from JWT
-            participantToken: token,
+            participantToken: token
         )
     }
 
