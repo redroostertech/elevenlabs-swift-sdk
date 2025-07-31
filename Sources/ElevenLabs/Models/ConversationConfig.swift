@@ -8,6 +8,12 @@ public struct ConversationConfig: Sendable {
     public var customLlmExtraBody: [String: String]? // Simplified to be Sendable
     public var dynamicVariables: [String: String]? // Simplified to be Sendable
     public var userId: String?
+    
+    /// Called when the agent is ready and the conversation can begin
+    public var onAgentReady: (@Sendable () -> Void)?
+    
+    /// Called when the agent disconnects or the conversation ends
+    public var onDisconnect: (@Sendable () -> Void)?
 
     public init(
         agentOverrides: AgentOverrides? = nil,
@@ -15,7 +21,9 @@ public struct ConversationConfig: Sendable {
         conversationOverrides: ConversationOverrides? = nil,
         customLlmExtraBody: [String: String]? = nil,
         dynamicVariables: [String: String]? = nil,
-        userId: String? = nil
+        userId: String? = nil,
+        onAgentReady: (@Sendable () -> Void)? = nil,
+        onDisconnect: (@Sendable () -> Void)? = nil
     ) {
         self.agentOverrides = agentOverrides
         self.ttsOverrides = ttsOverrides
@@ -23,6 +31,8 @@ public struct ConversationConfig: Sendable {
         self.customLlmExtraBody = customLlmExtraBody
         self.dynamicVariables = dynamicVariables
         self.userId = userId
+        self.onAgentReady = onAgentReady
+        self.onDisconnect = onDisconnect
     }
 }
 
@@ -72,7 +82,9 @@ extension ConversationConfig {
             ttsOverrides: ttsOverrides,
             customLlmExtraBody: customLlmExtraBody,
             dynamicVariables: dynamicVariables,
-            userId: userId
+            userId: userId,
+            onAgentReady: onAgentReady,
+            onDisconnect: onDisconnect
         )
     }
 }

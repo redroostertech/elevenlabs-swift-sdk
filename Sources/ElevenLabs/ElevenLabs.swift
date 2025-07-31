@@ -41,6 +41,8 @@ public enum ElevenLabs {
     /// - Parameters:
     ///   - agentId: The public ElevenLabs agent ID to connect to
     ///   - config: Optional conversation configuration (voice/text mode, overrides, etc.)
+    ///   - onAgentReady: Optional callback triggered when the agent is ready and conversation can begin
+    ///   - onDisconnect: Optional callback triggered when the agent disconnects or conversation ends
     /// - Returns: An active `Conversation` instance ready for interaction
     /// - Throws: `ConversationError` if connection fails, agent not found, or configuration invalid
     ///
@@ -54,22 +56,29 @@ public enum ElevenLabs {
     ///     config: .init(conversationOverrides: .init(textOnly: true))
     /// )
     ///
-    /// // Conversation with custom agent prompt and voice
-    /// let customConversation = try await ElevenLabs.startConversation(
+    /// // Conversation with event handlers
+    /// let conversation = try await ElevenLabs.startConversation(
     ///     agentId: "agent_123",
-    ///     config: .init(
-    ///         agentOverrides: .init(prompt: "You are a helpful cooking assistant"),
-    ///         ttsOverrides: .init(voiceId: "custom_voice_id")
-    ///     )
+    ///     onAgentReady: {
+    ///         print("Agent is ready!")
+    ///     },
+    ///     onDisconnect: {
+    ///         print("Agent disconnected")
+    ///     }
     /// )
     /// ```
     @MainActor
     public static func startConversation(
         agentId: String,
-        config: ConversationConfig = .init()
+        config: ConversationConfig = .init(),
+        onAgentReady: (@Sendable () -> Void)? = nil,
+        onDisconnect: (@Sendable () -> Void)? = nil
     ) async throws -> Conversation {
         let authConfig = ElevenLabsConfiguration.publicAgent(id: agentId)
-        return try await startConversation(auth: authConfig, config: config)
+        var updatedConfig = config
+        updatedConfig.onAgentReady = onAgentReady
+        updatedConfig.onDisconnect = onDisconnect
+        return try await startConversation(auth: authConfig, config: updatedConfig)
     }
 
     /// Start a conversation using a conversation token from your backend - for private agents.
@@ -82,6 +91,8 @@ public enum ElevenLabs {
     /// - Parameters:
     ///   - conversationToken: The conversation token from your backend
     ///   - config: Optional conversation configuration (voice/text mode, overrides, etc.)
+    ///   - onAgentReady: Optional callback triggered when the agent is ready and conversation can begin
+    ///   - onDisconnect: Optional callback triggered when the agent disconnects or conversation ends
     /// - Returns: An active `Conversation` instance ready for interaction
     /// - Throws: `ConversationError` if connection fails or token is invalid
     ///
@@ -100,10 +111,15 @@ public enum ElevenLabs {
     @MainActor
     public static func startConversation(
         conversationToken: String,
-        config: ConversationConfig = .init()
+        config: ConversationConfig = .init(),
+        onAgentReady: (@Sendable () -> Void)? = nil,
+        onDisconnect: (@Sendable () -> Void)? = nil
     ) async throws -> Conversation {
         let authConfig = ElevenLabsConfiguration.conversationToken(conversationToken)
-        return try await startConversation(auth: authConfig, config: config)
+        var updatedConfig = config
+        updatedConfig.onAgentReady = onAgentReady
+        updatedConfig.onDisconnect = onDisconnect
+        return try await startConversation(auth: authConfig, config: updatedConfig)
     }
 
     /// Start a conversation using a custom token provider - for advanced authentication scenarios.
@@ -113,6 +129,8 @@ public enum ElevenLabs {
     /// - Parameters:
     ///   - tokenProvider: An async closure that returns a conversation token
     ///   - config: Optional conversation configuration (voice/text mode, overrides, etc.)
+    ///   - onAgentReady: Optional callback triggered when the agent is ready and conversation can begin
+    ///   - onDisconnect: Optional callback triggered when the agent disconnects or conversation ends
     /// - Returns: An active `Conversation` instance ready for interaction
     /// - Throws: `ConversationError` if connection fails or token provider throws
     ///
@@ -130,10 +148,15 @@ public enum ElevenLabs {
     @MainActor
     public static func startConversation(
         tokenProvider: @escaping @Sendable () async throws -> String,
-        config: ConversationConfig = .init()
+        config: ConversationConfig = .init(),
+        onAgentReady: (@Sendable () -> Void)? = nil,
+        onDisconnect: (@Sendable () -> Void)? = nil
     ) async throws -> Conversation {
         let authConfig = ElevenLabsConfiguration.customTokenProvider(tokenProvider)
-        return try await startConversation(auth: authConfig, config: config)
+        var updatedConfig = config
+        updatedConfig.onAgentReady = onAgentReady
+        updatedConfig.onDisconnect = onDisconnect
+        return try await startConversation(auth: authConfig, config: updatedConfig)
     }
 
     /// Advanced: Start a conversation with full authentication control.

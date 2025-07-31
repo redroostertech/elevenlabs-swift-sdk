@@ -7,7 +7,7 @@ import LiveKit
 /// *agent‑ready* signal at the precise moment the remote agent is
 /// reachable **and** at least one of its audio tracks is subscribed.
 ///
-/// ▶︎ *Never too early*: we wait for both the participant *and* its track.
+/// ▶︎ *Never too early*: we wait for both the participant *and* its track subscription.
 /// ▶︎ *Never too late*: a short, configurable grace‑timeout prevents
 ///   indefinite waiting on networks where track subscription events can
 ///   be lost or delayed.
@@ -49,7 +49,7 @@ final class ConnectionManager {
         let room = Room()
         self.room = room
 
-        print("[ConnectionManager-Timing] Starting connection with grace timeout: \(graceTimeout)s")
+
 
         // Delegate encapsulates all readiness logic.
         let rd = ReadyDelegate(
@@ -100,7 +100,7 @@ private extension ConnectionManager {
     final class ReadyDelegate: RoomDelegate, @unchecked Sendable {
         // MARK: – FSM
 
-        private enum Stage { case idle, waitingForTrack, ready }
+        private enum Stage { case idle, waitingForSubscription, ready }
         private var stage: Stage = .idle
 
         // MARK: – Timing
@@ -134,7 +134,7 @@ private extension ConnectionManager {
                 // Check if we can go ready immediately (fast path)
                 var foundReadyAgent = false
                 for participant in room.remoteParticipants.values {
-                    if !participant.audioTracks.isEmpty {
+                    if hasSubscribedAudioTrack(participant) {
                         markReady()
                         foundReadyAgent = true
                         break
@@ -143,29 +143,30 @@ private extension ConnectionManager {
 
                 // Only wait if we didn't find a ready agent
                 if !foundReadyAgent {
-                    stage = .waitingForTrack
+                    stage = .waitingForSubscription
                     startTimeout()
                     // Start aggressive polling for audio track subscription
-                    startAudioTrackPolling(room: room)
+                    startAudioTrackSubscriptionPolling(room: room)
                 }
             }
         }
 
         func room(_ room: Room, participantDidConnect _: RemoteParticipant) {
-            guard stage == .idle else { return }
-            stage = .waitingForTrack
+            
+            stage = .waitingForSubscription
             startTimeout()
-            evaluateExistingTracks(in: room)
+            evaluateExistingSubscriptions(in: room)
             // Start aggressive polling for audio track subscription
-            startAudioTrackPolling(room: room)
+            startAudioTrackSubscriptionPolling(room: room)
         }
 
         func room(_: Room,
-                  participant _: RemoteParticipant,
-                  didPublishTrack publication: RemoteTrackPublication)
+                  participant: RemoteParticipant,
+                  didSubscribeTrack publication: RemoteTrackPublication)
         {
-            guard stage == .waitingForTrack else { return }
+            guard stage == .waitingForSubscription else { return }
             if publication.kind == .audio {
+                print("[ReadyDelegate-Timing] Audio track subscribed - marking ready!")
                 markReady()
             }
         }
@@ -182,17 +183,24 @@ private extension ConnectionManager {
 
         // MARK: – Private helpers
 
-        private func evaluateExistingTracks(in room: Room) {
+        private func evaluateExistingSubscriptions(in room: Room) {
             for participant in room.remoteParticipants.values {
-                // Check for published tracks instead of subscribed ones
-                if !participant.audioTracks.isEmpty {
+                // Check for subscribed tracks instead of published ones
+                if hasSubscribedAudioTrack(participant) {
                     markReady(); return
                 }
             }
-            print("[ReadyDelegate-Timing] No published audio tracks found yet, waiting...")
+            print("[ReadyDelegate-Timing] No subscribed audio tracks found yet, waiting...")
+        }
+
+        private func hasSubscribedAudioTrack(_ participant: RemoteParticipant) -> Bool {
+            return participant.audioTracks.contains { publication in
+                publication.isSubscribed && publication.track != nil
+            }
         }
 
         private func markReady() {
+            print("[ReadyDelegate-Timing] Marking ready!")
             guard stage != .ready else { return }
             stage = .ready
             cancelTimeout()
@@ -201,11 +209,11 @@ private extension ConnectionManager {
         }
 
         private func startTimeout() {
-            cancelTimeout()
+            
             print("[ReadyDelegate-Timing] Starting grace timeout of \(graceTimeout)s")
             timeoutTask = Task { [graceTimeout] in
                 try? await Task.sleep(nanoseconds: UInt64(graceTimeout * 1_000_000_000))
-                if !Task.isCancelled, stage == .waitingForTrack {
+                if !Task.isCancelled, stage == .waitingForSubscription {
                     print("[ReadyDelegate-Timing] Grace timeout reached! Marking ready anyway.")
                     markReady() // proceed after grace period
                 }
@@ -217,17 +225,17 @@ private extension ConnectionManager {
             timeoutTask = nil
         }
 
-        private func startAudioTrackPolling(room: Room) {
+        private func startAudioTrackSubscriptionPolling(room: Room) {
             cancelPolling()
-            print("[ReadyDelegate-Timing] Starting aggressive audio track polling...")
+            print("[ReadyDelegate-Timing] Starting aggressive audio track subscription polling...")
             pollingTask = Task {
                 // Poll every 50ms for up to 500ms (10 attempts)
                 for attempt in 1 ... 10 {
-                    guard !Task.isCancelled, stage == .waitingForTrack else { return }
+                    guard !Task.isCancelled, stage == .waitingForSubscription else { return }
 
                     for participant in room.remoteParticipants.values {
-                        if !participant.audioTracks.isEmpty {
-                            print("[ReadyDelegate-Timing] Polling detected published audio track on attempt \(attempt)!")
+                        if hasSubscribedAudioTrack(participant) {
+                            print("[ReadyDelegate-Timing] Polling detected subscribed audio track on attempt \(attempt)!")
                             markReady()
                             return
                         }
@@ -235,7 +243,7 @@ private extension ConnectionManager {
 
                     try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
                 }
-                print("[ReadyDelegate-Timing] Audio track polling completed without finding published track")
+                print("[ReadyDelegate-Timing] Audio track subscription polling completed without finding subscribed track")
             }
         }
 
@@ -261,25 +269,37 @@ private final class DataChannelDelegate: RoomDelegate, @unchecked Sendable {
         self.continuation = continuation
     }
 
-    func room(_: Room, participant _: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
+    // MARK: – Delegate
+
+    nonisolated func room(_: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
+        // Only process messages from the agent
+        guard let participant else {
+            print("[DataChannelReceiver] Received data but no participant, ignoring")
+            return
+        }
+
         continuation.yield(data)
     }
 
-    func room(_: Room, participant _: LocalParticipant?, didReceiveData data: Data, forTopic _: String) {
-        continuation.yield(data)
-    }
-
-    func room(_ room: Room, didUpdate connectionState: ConnectionState, from previousState: ConnectionState) {
+    nonisolated func room(_ room: Room, didUpdate connectionState: ConnectionState, from previousState: ConnectionState) {
         print("DataChannelDelegate: Connection state changed from \(previousState) to \(connectionState)")
         print("DataChannelDelegate: Remote participants count: \(room.remoteParticipants.count)")
+
+        if connectionState == .disconnected {
+            continuation.finish()
+        }
     }
 
-    func roomDidConnect(_ room: Room) {
-        print("DataChannelDelegate: Room connected successfully – remote participants: \(room.remoteParticipants.count)")
-    }
-
-    func room(_: Room, didDisconnectWithError _: Error?) {
+    nonisolated func room(_: Room, didDisconnectWithError _: Error?) {
         continuation.finish()
+    }
+
+    nonisolated func room(_: Room, participantDidConnect participant: RemoteParticipant) {
+        print("DataChannelDelegate: Remote participant \(participant.identity) connected")
+    }
+
+    nonisolated func room(_: Room, participantDidDisconnect participant: RemoteParticipant) {
+        print("DataChannelDelegate: Remote participant \(participant.identity) disconnected")
     }
 }
 
