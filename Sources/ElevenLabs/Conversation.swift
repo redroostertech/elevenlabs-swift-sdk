@@ -10,6 +10,44 @@ import Combine
 import Foundation
 import LiveKit
 
+// MARK: - Audio Frame Data
+
+/// Represents a single frame of audio data with metadata
+public struct AudioFrameData: Sendable {
+    /// The raw PCM audio data
+    public let data: Data
+    
+    /// Sample rate (e.g., 48000 Hz)
+    public let sampleRate: UInt32
+    
+    /// Number of audio channels (1 for mono, 2 for stereo)
+    public let channels: UInt32
+    
+    /// Number of samples per channel in this frame
+    public let samplesPerChannel: UInt32
+    
+    /// Timestamp when this frame was captured
+    public let timestamp: Date
+    
+    /// Source of the audio (user or agent)
+    public let source: AudioSource
+    
+    public enum AudioSource: String, Sendable {
+        case user = "user"
+        case agent = "agent"
+    }
+    
+    /// Duration of this audio frame in seconds
+    public var duration: TimeInterval {
+        TimeInterval(samplesPerChannel) / TimeInterval(sampleRate)
+    }
+    
+    /// Size of the audio data in bytes
+    public var byteSize: Int {
+        data.count
+    }
+}
+
 @MainActor
 public final class Conversation: ObservableObject, RoomDelegate {
     // MARK: - Public State
@@ -26,10 +64,18 @@ public final class Conversation: ObservableObject, RoomDelegate {
     @Published public private(set) var conversationMetadata: ConversationMetadataEvent?
 
     // Device lists (optional to expose; keep `internal` if you don't want them public)
-    @Published public private(set) var audioDevices: [AudioDevice] = AudioManager.shared
-        .inputDevices
-    @Published public private(set) var selectedAudioDeviceID: String = AudioManager.shared
-        .inputDevice.deviceId
+    @Published public private(set) var audioDevices: [AudioDevice] = AudioManager.shared.inputDevices
+    @Published public private(set) var selectedAudioDeviceID: String = AudioManager.shared.inputDevice.deviceId
+    
+    // Audio streaming
+    /// Latest audio frame from the user's microphone
+    @Published public private(set) var userAudioFrame: AudioFrameData?
+    
+    /// Latest audio frame from the agent
+    @Published public private(set) var agentAudioFrame: AudioFrameData?
+    
+    /// Latest audio frame from either source
+    @Published public private(set) var latestAudioFrame: AudioFrameData?
 
     // Audio tracks for advanced use cases
     public var inputTrack: LocalAudioTrack? {
@@ -311,6 +357,255 @@ public final class Conversation: ObservableObject, RoomDelegate {
     public func markToolCallCompleted(_ toolCallId: String) {
         pendingToolCalls.removeAll { $0.toolCallId == toolCallId }
     }
+    
+    // MARK: - Audio Streaming API
+    
+    /// Start streaming audio frames through @Published properties
+    /// Call this after the conversation is active to begin receiving audio frames
+    public func startAudioStreaming() {
+        guard state.isActive else {
+            print("[AudioStreaming] Cannot start audio streaming - conversation not active")
+            return
+        }
+        
+        audioStreamingEnabled = true
+        print("[AudioStreaming] Audio streaming enabled.")
+        
+        // Set up user audio streaming
+        setupUserAudioRenderer()
+        
+        // Set up agent audio streaming - retry if not available yet
+        setupAgentAudioRenderer()
+        
+        // If agent track not available yet, set up a retry mechanism
+        if audioStreamingState.agentRenderer == nil {
+            Task { @MainActor in
+                await retryAgentAudioSetup()
+            }
+        }
+        
+        // Start periodic audio level monitoring
+        startAudioLevelMonitoring()
+    }
+    
+    private var audioLevelTimer: Timer?
+    
+    private func startAudioLevelMonitoring() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.debugAudioLevels()
+            }
+        }
+    }
+    
+    private func setupUserAudioRenderer() {
+        // Skip user audio capture for now - focusing on agent audio only
+        print("[AudioStreaming] Skipping user audio setup - focusing on agent audio capture")
+    }
+    
+    private func setupAgentAudioRenderer() {
+        // Skip if already set up
+        guard audioStreamingState.agentRenderer == nil else {
+            print("[AudioStreaming] Agent renderer already set up")
+            return
+        }
+        
+        if let agentTrack = agentAudioTrack {
+            print("[AudioStreaming] Setting up agent audio renderer for track: \(agentTrack)")
+            
+            // Check track status
+            if let room = deps?.connectionManager.room,
+               let participant = room.remoteParticipants.values.first,
+               let publication = participant.firstAudioPublication {
+                print("[AudioStreaming] Agent track is subscribed: \(publication.isSubscribed)")
+                print("[AudioStreaming] Agent track is muted: \(publication.isMuted)")
+                print("[AudioStreaming] Agent track enabled: \(publication.track != nil)")
+                
+                // AudioRenderer should work for remote tracks since they're played back
+                if publication.isSubscribed && !publication.isMuted {
+                    print("[AudioStreaming] Agent track should provide audio frames via renderer")
+                } else {
+                    print("[AudioStreaming] Agent track won't provide frames (not subscribed or muted)")
+                }
+            }
+            
+            let agentRenderer = AudioFrameCapture(source: .agent) { [weak self] frame in
+                Task { @MainActor in
+                    self?.agentAudioFrame = frame
+                    self?.latestAudioFrame = frame
+                    
+                    // Update statistics
+                    self?.audioStatistics.frameCount += 1
+                    self?.audioStatistics.agentFrameCount += 1
+                    self?.audioStatistics.totalBytes += frame.byteSize
+                    self?.audioStatistics.totalDuration += frame.duration
+                    
+                    print("[AudioStreaming] Published agent frame: \(frame.byteSize) bytes")
+                }
+            }
+            agentTrack.add(audioRenderer: agentRenderer)
+            agentRenderer.startCapture()
+            
+            // Store renderer for cleanup
+            audioStreamingState.agentRenderer = agentRenderer
+            print("[AudioStreaming] Agent audio renderer added successfully - should receive playback audio")
+        } else {
+            print("[AudioStreaming] WARNING: No agent audio track available yet")
+        }
+    }
+    
+    private func retryAgentAudioSetup() async {
+        // Retry for up to 5 seconds
+        for attempt in 1...10 {
+            if !audioStreamingEnabled { break }
+            
+            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            
+            if agentAudioTrack != nil {
+                print("[AudioStreaming] Agent audio track now available (attempt \(attempt))")
+                setupAgentAudioRenderer()
+                break
+            }
+        }
+    }
+    
+    /// Stop audio streaming and clean up resources
+    public func stopAudioStreaming() {
+        audioStreamingEnabled = false
+        
+        // Stop audio level monitoring
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
+        
+        // Remove user audio renderer
+        if let userRenderer = audioStreamingState.userRenderer,
+           let userTrack = inputTrack {
+            userTrack.remove(audioRenderer: userRenderer)
+            audioStreamingState.userRenderer = nil
+        }
+        
+        // Remove agent audio renderer
+        if let agentRenderer = audioStreamingState.agentRenderer,
+           let agentTrack = agentAudioTrack {
+            agentTrack.remove(audioRenderer: agentRenderer)
+            audioStreamingState.agentRenderer = nil
+        }
+        
+        // Clear the published frames
+        Task { @MainActor in
+            userAudioFrame = nil
+            agentAudioFrame = nil
+            latestAudioFrame = nil
+        }
+    }
+    
+    /// Debug method to log current audio streaming state
+    public func debugAudioStreamState() {
+        Task { @MainActor in
+            print("\n=== Audio Streaming Debug ===")
+            print("Audio streaming enabled: \(audioStreamingEnabled)")
+            print("User audio streaming enabled: \(isUserAudioStreamingEnabled)")
+            print("Agent audio streaming enabled: \(isAgentAudioStreamingEnabled)")
+            print("Current statistics: \(audioStatistics)")
+            
+            if let inputTrack = inputTrack {
+                print("Input track exists: \(inputTrack)")
+                print("Input track muted: \(inputTrack.isMuted)")
+            } else {
+                print("No input track available")
+            }
+            
+            if let agentAudioTrack = agentAudioTrack {
+                print("Agent audio track exists: \(agentAudioTrack)")
+                print("Agent track type: \(type(of: agentAudioTrack))")
+                
+                // Check if track has audio level info
+                if let room = deps?.connectionManager.room,
+                   let participant = room.remoteParticipants.values.first {
+                    print("Agent participant: \(participant.identity)")
+                    if let publication = participant.firstAudioPublication {
+                        print("Agent audio publication exists")
+                        print("Track: \(String(describing: publication.track))")
+                        print("Track subscribed: \(publication.isSubscribed)")
+                        print("Track muted: \(publication.isMuted)")
+                    }
+                }
+                
+                // Check if we have a renderer attached
+                print("\nRenderer check:")
+                print("- Agent audio renderer exists: \(audioStreamingState.agentRenderer != nil)")
+                if let renderer = audioStreamingState.agentRenderer as? AudioFrameCapture {
+                    print("- Renderer started: \(renderer.isStarted)")
+                    print("- Frame count: \(renderer.frameCount)")
+                }
+            } else {
+                print("No agent audio track available")
+            }
+            
+            print("=========================\n")
+        }
+    }
+    
+    /// Automatically start audio streaming when conversation becomes active
+    public func enableAutoAudioStreaming() {
+        // Monitor conversation state and automatically start/stop audio streaming
+        $state
+            .sink { [weak self] state in
+                switch state {
+                case .active:
+                    self?.startAudioStreaming()
+                case .ended, .error:
+                    self?.stopAudioStreaming()
+                default:
+                    break
+                }
+            }
+            .store(in: &audioStreamingCancellables)
+    }
+    
+    /// Manually check and set up agent audio if it becomes available
+    /// Call this when you detect the agent is speaking but audio isn't streaming
+    public func refreshAudioStreaming() {
+        guard audioStreamingEnabled else { return }
+        
+        // Try to set up agent audio if not already done
+        if audioStreamingState.agentRenderer == nil {
+            setupAgentAudioRenderer()
+        }
+        
+        // Try to set up user audio if not already done
+        if audioStreamingState.userRenderer == nil {
+            setupUserAudioRenderer()
+        }
+        
+        // Debug: Check audio levels
+        debugAudioLevels()
+    }
+    
+    /// Debug helper to check audio levels
+    public func debugAudioLevels() {
+        if let room = deps?.connectionManager.room {
+            // Check local participant audio
+            if let localAudio = room.localParticipant.firstAudioPublication {
+                print("[AudioDebug] Local is muted: \(localAudio.isMuted)")
+                if let track = localAudio.track as? LocalAudioTrack {
+                    print("[AudioDebug] Local track exists: true")
+                }
+            }
+            
+            // Check remote participants audio
+            for (_, participant) in room.remoteParticipants {
+                if let remoteAudio = participant.firstAudioPublication {
+                    print("[AudioDebug] Remote is muted: \(remoteAudio.isMuted)")
+                    print("[AudioDebug] Remote is subscribed: \(remoteAudio.isSubscribed)")
+                    if let track = remoteAudio.track as? RemoteAudioTrack {
+                        print("[AudioDebug] Remote track exists: true")
+                    }
+                }
+            }
+        }
+    }
 
     // MARK: - Private
 
@@ -323,12 +618,47 @@ public final class Conversation: ObservableObject, RoomDelegate {
     private var protocolEventsTask: Task<Void, Never>?
     private var conversationInitTask: Task<Void, Never>?
 
+    internal var audioStreamingEnabled = false
+    private var audioStreamingCancellables = Set<AnyCancellable>()
+    
+    /// Whether user audio streaming is currently enabled
+    public var isUserAudioStreamingEnabled: Bool {
+        audioStreamingEnabled && audioStreamingState.userRenderer != nil
+    }
+    
+    /// Whether agent audio streaming is currently enabled
+    public var isAgentAudioStreamingEnabled: Bool {
+        audioStreamingEnabled && audioStreamingState.agentRenderer != nil
+    }
+    
+    /// Audio streaming statistics
+    private var audioStatistics = AudioStatistics()
+    
+    /// Private storage for audio renderers
+    private var audioStreamingState: AudioStreamingState {
+        get {
+            let key = UnsafeRawPointer(bitPattern: audioStreamingStateKey.hashValue)!
+            if let state = objc_getAssociatedObject(self, key) as? AudioStreamingState {
+                return state
+            }
+            let state = AudioStreamingState()
+            objc_setAssociatedObject(self, key, state, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            return state
+        }
+    }
+
     private func resetFlags() {
         // Don't reset isMuted - it should reflect actual room state
         agentState = .listening
         pendingToolCalls.removeAll()
         conversationMetadata = nil
         conversationInitTask?.cancel()
+        // Stop audio streaming and clear frames
+        if audioStreamingEnabled {
+            stopAudioStreaming()
+        }
+        // Clear cancellables
+        audioStreamingCancellables.removeAll()
     }
 
     /// Clean up state from any previous conversation to ensure a fresh start.
@@ -755,10 +1085,25 @@ extension Conversation: ParticipantDelegate {
                     // Immediately switch to speaking and cancel any pending timeout
                     self.speakingTimer?.cancel()
                     self.agentState = .speaking
+                    
+                    // When agent starts speaking, ensure audio streaming is set up
+                    if self.audioStreamingEnabled {
+                        self.refreshAudioStreaming()
+                    }
                 } else {
                     // Add timeout before switching to listening to handle natural speech gaps
                     self.scheduleBackToListening(delay: 1.0) // 1 second delay for natural gaps
                 }
+            }
+        }
+    }
+    
+    public nonisolated func participant(_ participant: RemoteParticipant, didUpdateAudioTrack publication: RemoteTrackPublication) {
+        print("[AudioStreaming] Remote participant audio track updated: \(publication)")
+        if let audioTrack = publication.track as? RemoteAudioTrack {
+            print("[AudioStreaming] Audio track info: \(audioTrack)")
+            if let sid = audioTrack.sid {
+                print("[AudioStreaming] Track SID: \(sid)")
             }
         }
     }
@@ -767,15 +1112,13 @@ extension Conversation: ParticipantDelegate {
 // MARK: - Simple Data Delegate
 
 private final class ConversationDataDelegate: RoomDelegate, @unchecked Sendable {
-    private let onData: (Data) -> Void
+    private let onData: @Sendable (Data) -> Void
 
-    init(onData: @escaping (Data) -> Void) {
+    init(onData: @escaping @Sendable (Data) -> Void) {
         self.onData = onData
     }
 
-    func room(
-        _: Room, participant _: RemoteParticipant?, didReceiveData data: Data, forTopic _: String
-    ) {
+    nonisolated func room(_: Room, participant _: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
         onData(data)
     }
 }
@@ -908,5 +1251,189 @@ public enum ConversationError: LocalizedError, Sendable, Equatable {
         case .agentTimeout: "Agent did not join in time."
         case let .microphoneToggleFailed(description): "Failed to toggle microphone: \(description)"
         }
+    }
+}
+
+// MARK: - Audio Streaming Support
+
+/// State holder for audio renderers
+private class AudioStreamingState {
+    var userRenderer: AudioFrameCapture?
+    var agentRenderer: AudioFrameCapture?
+}
+
+/// Associated object key for audio streaming state
+internal let audioStreamingStateKey = "audioStreamingStateKey"
+
+/// Audio renderer that captures PCM frames from LiveKit tracks
+public final class AudioFrameCapture: NSObject, AudioRenderer, @unchecked Sendable {
+    private let onFrame: @Sendable (AudioFrameData) -> Void
+    private let source: AudioFrameData.AudioSource
+    private let startTime = Date()
+    internal private(set) var isStarted = false
+    internal private(set) var frameCount = 0
+    
+    init(source: AudioFrameData.AudioSource, onFrame: @escaping @Sendable (AudioFrameData) -> Void) {
+        self.source = source
+        self.onFrame = onFrame
+        super.init()
+        print("[AudioFrameCapture] ✅ Initialized for \(source.rawValue)")
+    }
+    
+    deinit {
+        print("[AudioFrameCapture] 🛑 Deinitialized for \(source.rawValue) - captured \(frameCount) frames")
+    }
+    
+    // MARK: - AudioRenderer Protocol
+    
+    public func startCapture() {
+        isStarted = true
+        print("[AudioFrameCapture] ▶️ Started capture for \(source.rawValue)")
+    }
+    
+    public func stopCapture() {
+        isStarted = false
+        print("[AudioFrameCapture] ⏹ Stopped capture for \(source.rawValue) - total frames: \(frameCount)")
+    }
+    
+    public func render(pcmBuffer: AVAudioPCMBuffer) {
+        // This method is called during audio playback
+        guard pcmBuffer.frameLength > 0 else { return }
+        
+        frameCount += 1
+        
+        // Check buffer format
+        let format = pcmBuffer.format
+        let channelCount = Int(format.channelCount)
+        let frameLength = Int(pcmBuffer.frameLength)
+        let sampleRate = UInt32(format.sampleRate)
+        
+        // Log format info on first frame
+        if frameCount == 1 {
+            print("[AudioFrameCapture] 🎧 Audio format for \(source.rawValue):")
+            print("  - Format: \(format)")
+            print("  - Channels: \(channelCount)")
+            print("  - Sample Rate: \(sampleRate)")
+            print("  - Frame Length: \(frameLength)")
+            print("  - Common Format: \(format.commonFormat.rawValue)")
+//            print("  - Is Float: \(format.isFloat)")
+            print("  - Is Interleaved: \(format.isInterleaved)")
+            print("  - Bits per channel: \(format.streamDescription.pointee.mBitsPerChannel)")
+        }
+        
+        var audioData = Data()
+        
+        // Try different PCM data formats based on what LiveKit provides
+        if let floatData = pcmBuffer.floatChannelData {
+            // Handle float PCM
+            audioData.reserveCapacity(frameLength * channelCount * 2)
+            
+            for frame in 0..<frameLength {
+                for channel in 0..<channelCount {
+                    let sample = floatData[channel][frame]
+                    let int16Sample = Int16(max(-32768, min(32767, sample * 32767)))
+                    audioData.append(contentsOf: withUnsafeBytes(of: int16Sample) { Array($0) })
+                }
+            }
+            
+            if frameCount == 1 {
+                print("[AudioFrameCapture] ✅ Using float data path")
+            }
+        }
+        else if let int16Data = pcmBuffer.int16ChannelData {
+            // Handle int16 PCM directly
+            audioData.reserveCapacity(frameLength * channelCount * 2)
+            
+            for frame in 0..<frameLength {
+                for channel in 0..<channelCount {
+                    let sample = int16Data[channel][frame]
+                    audioData.append(contentsOf: withUnsafeBytes(of: sample) { Array($0) })
+                }
+            }
+            
+            if frameCount == 1 {
+                print("[AudioFrameCapture] ✅ Using int16 data path")
+            }
+        }
+        else if let int32Data = pcmBuffer.int32ChannelData {
+            // Handle int32 PCM
+            audioData.reserveCapacity(frameLength * channelCount * 2)
+            
+            for frame in 0..<frameLength {
+                for channel in 0..<channelCount {
+                    let sample = int32Data[channel][frame]
+                    // Convert int32 to int16 by scaling
+                    let int16Sample = Int16(sample >> 16)
+                    audioData.append(contentsOf: withUnsafeBytes(of: int16Sample) { Array($0) })
+                }
+            }
+            
+            if frameCount == 1 {
+                print("[AudioFrameCapture] ✅ Using int32 data path")
+            }
+        }
+        else {
+            // Try raw audio buffer list for interleaved data
+            let audioBufferList = pcmBuffer.audioBufferList
+            let bufferCount = Int(audioBufferList.pointee.mNumberBuffers)
+            
+            if bufferCount > 0 {
+                let buffer = audioBufferList.pointee.mBuffers
+                if let dataPointer = buffer.mData {
+                    audioData = Data(bytes: dataPointer, count: Int(buffer.mDataByteSize))
+                    
+                    if frameCount == 1 {
+                        print("[AudioFrameCapture] ✅ Using raw buffer data path - \(buffer.mDataByteSize) bytes")
+                    }
+                }
+            }
+            
+            if audioData.isEmpty {
+                if frameCount == 1 {
+                    print("[AudioFrameCapture] ❌ No compatible audio data format found")
+                }
+                return
+            }
+        }
+        
+        guard audioData.count > 0 else {
+            print("[AudioFrameCapture] ⚠️ WARNING: No audio data converted for \(source.rawValue)")
+            return
+        }
+        
+        let frameData = AudioFrameData(
+            data: audioData,
+            sampleRate: sampleRate,
+            channels: UInt32(channelCount),
+            samplesPerChannel: UInt32(frameLength),
+            timestamp: Date(),
+            source: source
+        )
+        
+        // Log successful capture
+        if frameCount == 1 {
+            print("[AudioFrameCapture] 🎯 First frame captured for \(source.rawValue): \(audioData.count) bytes")
+        }
+        
+        onFrame(frameData)
+    }
+}
+
+// MARK: - Audio Statistics
+
+/// Statistics for audio streaming
+public struct AudioStatistics {
+    public var frameCount: Int = 0
+    public var userFrameCount: Int = 0
+    public var agentFrameCount: Int = 0
+    public var totalBytes: Int = 0
+    public var totalDuration: TimeInterval = 0
+    
+    public var averageFrameSize: Int {
+        frameCount > 0 ? totalBytes / frameCount : 0
+    }
+    
+    public var averageFrameDuration: TimeInterval {
+        frameCount > 0 ? totalDuration / TimeInterval(frameCount) : 0
     }
 }

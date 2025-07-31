@@ -208,7 +208,9 @@ private extension ConnectionManager {
             stage = .ready
             cancelTimeout()
             cancelPolling() // Stop polling when ready
-            onReady()
+            Task { @MainActor in
+                onReady()
+            }
         }
 
         private func startTimeout() {
