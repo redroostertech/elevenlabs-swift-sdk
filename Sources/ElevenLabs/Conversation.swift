@@ -17,7 +17,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
     @Published public private(set) var state: ConversationState = .idle
     @Published public private(set) var messages: [Message] = []
     @Published public private(set) var agentState: AgentState = .listening
-    @Published public private(set) var isMuted: Bool = false
+    @Published public private(set) var isMuted: Bool = true // Start as true, will be updated based on actual state
 
     /// Stream of client tool calls that need to be executed by the app
     @Published public private(set) var pendingToolCalls: [ClientToolCallEvent] = []
@@ -59,7 +59,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
     // MARK: - Public API
 
     /// Start a conversation with an agent using agent ID.
-    /// 
+    ///
     /// Each call to this method creates a fresh Room object, ensuring clean state
     /// and preventing any interference from previous conversations.
     public func startConversation(
@@ -71,7 +71,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
     }
 
     /// Start a conversation using authentication configuration.
-    /// 
+    ///
     /// Each call to this method creates a fresh Room object, ensuring clean state
     /// and preventing any interference from previous conversations.
     public func startConversation(
@@ -92,7 +92,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
         // Ensure any existing room is disconnected and cleaned up before creating a new one
         // This guarantees a fresh Room object for each conversation
         await deps.connectionManager.disconnect()
-        
+
         // Clean up any existing state from previous conversations
         cleanupPreviousConversation()
 
@@ -137,7 +137,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 } else {
                     print("[ElevenLabs-Timing] Room not fully connected yet, waiting...")
                     // Small delay to allow room connection to complete
-                    try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
                     if let room = deps.connectionManager.room, room.connectionState == .connected {
                         print("[ElevenLabs-Timing] Room connected after wait")
                     } else {
@@ -177,7 +177,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 print(
                     "[ElevenLabs-Timing] Total startup time: \(Date().timeIntervalSince(startTime))s"
                 )
-                
+
                 // Call user's onAgentReady callback if provided
                 options.onAgentReady?()
             }
@@ -189,7 +189,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 if self.state.isActive {
                     self.state = .ended(reason: .remoteDisconnected)
                     self.cleanupPreviousConversation()
-                    
+
                     // Call user's onDisconnect callback if provided
                     self.options.onDisconnect?()
                 }
@@ -202,10 +202,16 @@ public final class Conversation: ObservableObject, RoomDelegate {
         do {
             try await deps.connectionManager.connect(
                 details: connDetails,
-                enableMic: !options.conversationOverrides.textOnly)
+                enableMic: !options.conversationOverrides.textOnly
+            )
             print(
                 "[ElevenLabs-Timing] Room connected in \(Date().timeIntervalSince(connectionStart))s"
             )
+
+            // Immediately sync the mute state after connection
+            if let room = deps.connectionManager.room {
+                updateFromRoom(room)
+            }
         } catch {
             // Convert connection errors to ConversationError
             throw ConversationError.connectionFailed(error)
@@ -222,7 +228,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
         case let .publicAgentId(id):
             return id
         case .conversationToken, .customTokenProvider:
-            return "unknown"  // We don't have access to the agent ID in these cases
+            return "unknown" // We don't have access to the agent ID in these cases
         }
     }
 
@@ -232,7 +238,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
         await deps?.connectionManager.disconnect()
         state = .ended(reason: .userEnded)
         cleanupPreviousConversation()
-        
+
         // Call user's onDisconnect callback if provided
         options.onDisconnect?()
     }
@@ -289,7 +295,8 @@ public final class Conversation: ObservableObject, RoomDelegate {
     {
         guard state.isActive else { throw ConversationError.notConnected }
         let toolResult = try ClientToolResultEvent(
-            toolCallId: toolCallId, result: result, isError: isError)
+            toolCallId: toolCallId, result: result, isError: isError
+        )
         let event = OutgoingEvent.clientToolResult(toolResult)
         try await publish(event)
 
@@ -314,7 +321,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
     private var conversationInitTask: Task<Void, Never>?
 
     private func resetFlags() {
-        isMuted = false
+        // Don't reset isMuted - it should reflect actual room state
         agentState = .listening
         pendingToolCalls.removeAll()
         conversationInitTask?.cancel()
@@ -329,21 +336,21 @@ public final class Conversation: ObservableObject, RoomDelegate {
         protocolEventsTask?.cancel()
         conversationInitTask?.cancel()
         speakingTimer?.cancel()
-        
+
         // Reset task references
         roomChangesTask = nil
         protocolEventsTask = nil
         conversationInitTask = nil
         speakingTimer = nil
-        
+
         // Clear conversation state
         messages.removeAll()
         pendingToolCalls.removeAll()
-        
+
         // Reset agent state
         agentState = .listening
-        isMuted = false
-        
+        isMuted = true // Start muted, will be updated based on actual room state
+
         print("[ElevenLabs] Previous conversation state cleaned up for fresh Room")
     }
 
@@ -387,10 +394,10 @@ public final class Conversation: ObservableObject, RoomDelegate {
         case .connected, .reconnecting:
             if state == .connecting { state = .active(.init(agentId: state.activeAgentId ?? "")) }
         case .disconnected:
-            if state.isActive { 
+            if state.isActive {
                 state = .ended(reason: .remoteDisconnected)
                 cleanupPreviousConversation()
-                
+
                 // Call user's onDisconnect callback if provided
                 options.onDisconnect?()
             }
@@ -422,7 +429,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
             room?.add(delegate: delegate)
 
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             }
         }
     }
@@ -525,18 +532,18 @@ public final class Conversation: ObservableObject, RoomDelegate {
     /// Determine optimal buffer time based on agent readiness pattern
     /// Different agents need different buffer times for conversation processing readiness
     private func determineOptimalBuffer() async -> TimeInterval {
-        guard let room = deps?.connectionManager.room else { return 150.0 }  // Default buffer if no room
+        guard let room = deps?.connectionManager.room else { return 150.0 } // Default buffer if no room
 
         // Check if we have any remote participants
         guard !room.remoteParticipants.isEmpty else {
             print("[ElevenLabs-Timing] No remote participants found, using longer buffer")
-            return 200.0  // Longer wait if no agent detected
+            return 200.0 // Longer wait if no agent detected
         }
 
         // For now, we'll use a moderate buffer that should work for most cases
         // This is based on empirical observation that first messages arrive ~2-4s after conversation init
         // But we don't want to wait that long, so we'll use a compromise
-        let buffer: TimeInterval = 150.0  // 150ms compromise between speed and reliability
+        let buffer: TimeInterval = 150.0 // 150ms compromise between speed and reliability
 
         print("[ElevenLabs-Timing] Determined optimal buffer: \(Int(buffer))ms")
         return buffer
@@ -546,12 +553,12 @@ public final class Conversation: ObservableObject, RoomDelegate {
     /// Uses state-based detection instead of arbitrary delays
     private func waitForSystemReady(timeout: TimeInterval = 1.5) async -> Bool {
         let startTime = Date()
-        let pollInterval: UInt64 = 50_000_000  // 50ms in nanoseconds
-        let maxAttempts = Int(timeout * 1000 / 50)  // Convert timeout to number of 50ms attempts
+        let pollInterval: UInt64 = 50_000_000 // 50ms in nanoseconds
+        let maxAttempts = Int(timeout * 1000 / 50) // Convert timeout to number of 50ms attempts
 
         print("[ElevenLabs-Timing] Checking system readiness (state-based detection)...")
 
-        for attempt in 1...maxAttempts {
+        for attempt in 1 ... maxAttempts {
             // Check if we've exceeded timeout
             let elapsed = Date().timeIntervalSince(startTime)
             if elapsed > timeout {
@@ -623,10 +630,10 @@ public final class Conversation: ObservableObject, RoomDelegate {
     private func sendConversationInitWithRetry(config: ConversationConfig, maxAttempts: Int = 3)
         async
     {
-        for attempt in 1...maxAttempts {
+        for attempt in 1 ... maxAttempts {
             // More aggressive exponential backoff: 0, 100ms, 300ms
             if attempt > 1 {
-                let delay = Double(attempt - 1) * 0.1 + Double(attempt - 2) * 0.2  // 0.1s, 0.3s
+                let delay = Double(attempt - 1) * 0.1 + Double(attempt - 2) * 0.2 // 0.1s, 0.3s
                 print("[Retry] Attempt \(attempt) of \(maxAttempts), backoff delay: \(delay)s")
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             } else {
@@ -654,7 +661,8 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 id: UUID().uuidString,
                 role: .user,
                 content: text,
-                timestamp: Date())
+                timestamp: Date()
+            )
         )
     }
 
@@ -664,7 +672,8 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 id: UUID().uuidString,
                 role: .agent,
                 content: text,
-                timestamp: Date())
+                timestamp: Date()
+            )
         )
     }
 
@@ -675,7 +684,8 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 id: UUID().uuidString,
                 role: .user,
                 content: text,
-                timestamp: Date())
+                timestamp: Date()
+            )
         )
     }
 
@@ -685,15 +695,16 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 id: UUID().uuidString,
                 role: .agent,
                 content: text,
-                timestamp: Date())
+                timestamp: Date()
+            )
         )
     }
 }
 
 // MARK: - RoomDelegate
 
-extension Conversation {
-    public nonisolated func room(
+public extension Conversation {
+    nonisolated func room(
         _: Room, participant: Participant, didUpdateIsSpeaking isSpeaking: Bool
     ) {
         if participant is RemoteParticipant {
@@ -704,13 +715,13 @@ extension Conversation {
                     self.agentState = .speaking
                 } else {
                     // Add timeout before switching to listening to handle natural speech gaps
-                    self.scheduleBackToListening(delay: 1.0)  // 1 second delay for natural gaps
+                    self.scheduleBackToListening(delay: 1.0) // 1 second delay for natural gaps
                 }
             }
         }
     }
 
-    public nonisolated func room(_: Room, participantDidJoin participant: RemoteParticipant) {
+    nonisolated func room(_: Room, participantDidJoin participant: RemoteParticipant) {
         participant.add(delegate: self)
     }
 }
@@ -729,7 +740,7 @@ extension Conversation: ParticipantDelegate {
                     self.agentState = .speaking
                 } else {
                     // Add timeout before switching to listening to handle natural speech gaps
-                    self.scheduleBackToListening(delay: 1.0)  // 1 second delay for natural gaps
+                    self.scheduleBackToListening(delay: 1.0) // 1 second delay for natural gaps
                 }
             }
         }
@@ -806,13 +817,13 @@ public struct ConversationOptions: Sendable {
     public var conversationOverrides: ConversationOverrides
     public var agentOverrides: AgentOverrides?
     public var ttsOverrides: TTSOverrides?
-    public var customLlmExtraBody: [String: String]?  // Simplified to be Sendable
-    public var dynamicVariables: [String: String]?  // Simplified to be Sendable
+    public var customLlmExtraBody: [String: String]? // Simplified to be Sendable
+    public var dynamicVariables: [String: String]? // Simplified to be Sendable
     public var userId: String?
-    
+
     /// Called when the agent is ready and the conversation can begin
     public var onAgentReady: (@Sendable () -> Void)?
-    
+
     /// Called when the agent disconnects or the conversation ends
     public var onDisconnect: (@Sendable () -> Void)?
 
@@ -857,10 +868,10 @@ extension ConversationOptions {
 public enum ConversationError: LocalizedError, Sendable, Equatable {
     case notConnected
     case alreadyActive
-    case connectionFailed(String)  // Store error description instead of Error for Equatable
+    case connectionFailed(String) // Store error description instead of Error for Equatable
     case authenticationFailed(String)
     case agentTimeout
-    case microphoneToggleFailed(String)  // Store error description instead of Error for Equatable
+    case microphoneToggleFailed(String) // Store error description instead of Error for Equatable
 
     // Helper methods to create errors with Error types
     public static func connectionFailed(_ error: Error) -> ConversationError {

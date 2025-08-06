@@ -49,8 +49,6 @@ final class ConnectionManager {
         let room = Room()
         self.room = room
 
-
-
         // Delegate encapsulates all readiness logic.
         let rd = ReadyDelegate(
             graceTimeout: graceTimeout,
@@ -69,8 +67,14 @@ final class ConnectionManager {
         print("[ConnectionManager-Timing] LiveKit room.connect completed in \(Date().timeIntervalSince(connectStart))s")
 
         if enableMic {
-            // Do not await—mic enabling should never gate readiness.
-            Task { try? await room.localParticipant.setMicrophone(enabled: true) }
+            // Await microphone enabling to ensure it's ready before proceeding
+            do {
+                try await room.localParticipant.setMicrophone(enabled: true)
+                print("[ConnectionManager] Microphone enabled successfully")
+            } catch {
+                print("[ConnectionManager] Failed to enable microphone: \(error)")
+                // Don't throw - microphone issues shouldn't prevent connection
+            }
         }
     }
 
@@ -152,7 +156,6 @@ private extension ConnectionManager {
         }
 
         func room(_ room: Room, participantDidConnect _: RemoteParticipant) {
-            
             stage = .waitingForSubscription
             startTimeout()
             evaluateExistingSubscriptions(in: room)
@@ -161,7 +164,7 @@ private extension ConnectionManager {
         }
 
         func room(_: Room,
-                  participant: RemoteParticipant,
+                  participant _: RemoteParticipant,
                   didSubscribeTrack publication: RemoteTrackPublication)
         {
             guard stage == .waitingForSubscription else { return }
@@ -209,7 +212,6 @@ private extension ConnectionManager {
         }
 
         private func startTimeout() {
-            
             print("[ReadyDelegate-Timing] Starting grace timeout of \(graceTimeout)s")
             timeoutTask = Task { [graceTimeout] in
                 try? await Task.sleep(nanoseconds: UInt64(graceTimeout * 1_000_000_000))
