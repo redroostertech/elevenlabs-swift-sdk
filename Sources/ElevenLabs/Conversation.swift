@@ -477,6 +477,11 @@ public final class Conversation: ObservableObject, RoomDelegate {
         case let .vadScore(vadScoreEvent):
             // VAD scores are available in the event stream
             break
+
+        case let .agentToolResponse(toolResponse):
+            // Agent tool response is available in the event stream
+            // This can be used to track tool executions by the agent
+            break
         }
     }
 
