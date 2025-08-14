@@ -23,6 +23,10 @@ final class ConnectionManager {
 
     /// Fired when all remote participants have left or the room disconnects.
     var onAgentDisconnected: (() -> Void)?
+    
+    /// Fired when the WebRTC connection is established (local network permission resolved).
+    /// This happens before the agent is ready and can be used to delay agent launch.
+    var onConnectionEstablished: (() -> Void)?
 
     // MARK: – Public state accessors
 
@@ -58,7 +62,8 @@ final class ConnectionManager {
                 print("[ConnectionManager-Timing] Ready delegate fired onReady callback")
                 self?.onAgentReady?()
             },
-            onDisconnected: { [weak self] in self?.onAgentDisconnected?() }
+            onDisconnected: { [weak self] in self?.onAgentDisconnected?() },
+            onConnectionEstablished: { [weak self] in self?.onConnectionEstablished?() }
         )
         readyDelegate = rd
         room.add(delegate: rd)
@@ -113,21 +118,29 @@ private extension ConnectionManager {
 
         private let onReady: () -> Void
         private let onDisconnected: () -> Void
+        private let onConnectionEstablished: () -> Void
 
         // MARK: – Init
 
         init(graceTimeout: TimeInterval,
              onReady: @escaping () -> Void,
-             onDisconnected: @escaping () -> Void)
+             onDisconnected: @escaping () -> Void,
+             onConnectionEstablished: @escaping () -> Void)
         {
             self.graceTimeout = graceTimeout
             self.onReady = onReady
             self.onDisconnected = onDisconnected
+            self.onConnectionEstablished = onConnectionEstablished
         }
 
         // MARK: – RoomDelegate
 
         func roomDidConnect(_ room: Room) {
+            // Notify that connection is established (local network permission resolved)
+            Task { @MainActor in
+                onConnectionEstablished()
+            }
+            
             guard stage == .idle else { return }
 
             if !room.remoteParticipants.isEmpty {
@@ -175,7 +188,9 @@ private extension ConnectionManager {
         {
             guard room.remoteParticipants.isEmpty else { return }
             reset()
-            onDisconnected()
+            Task { @MainActor in
+                onDisconnected()
+            }
         }
 
         func room(_: Room, didUpdate _: ConnectionState, from _: ConnectionState) { /* unused */ }
