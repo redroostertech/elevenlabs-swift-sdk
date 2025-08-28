@@ -6,6 +6,9 @@ A Swift SDK for integrating ElevenLabs' conversational AI capabilities into your
 
 ## Quick Start
 
+### Requirements
+- Xcode (minimum 16.3)
+
 ### Installation
 
 Add to your project using Swift Package Manager:
