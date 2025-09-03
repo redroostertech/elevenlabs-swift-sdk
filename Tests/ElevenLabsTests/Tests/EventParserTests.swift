@@ -6,7 +6,9 @@ final class EventParserTests: XCTestCase {
         let json = """
         {
             "type": "user_transcript",
-            "user_transcript": "Hello World"
+            "user_transcription_event": {
+                "user_transcript": "hello world"
+            }
         }
         """.data(using: .utf8)!
 
@@ -17,14 +19,16 @@ final class EventParserTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(transcript.transcript, "Hello World")
+        XCTAssertEqual(transcript.transcript, "hello world")
     }
 
     func testParseAgentResponseEvent() throws {
         let json = """
         {
             "type": "agent_response",
-            "agent_response": "hello"
+            "agent_response_event": {
+                "agent_response": "hello"
+            }
         }
         """.data(using: .utf8)!
 
@@ -63,7 +67,7 @@ final class EventParserTests: XCTestCase {
         let json = """
         {
             "type": "interruption",
-            "interruption": {
+            "interruption_event": {
                 "event_id": 123
             }
         }

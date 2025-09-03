@@ -67,7 +67,7 @@ actor DataChannelReceiver: MessageReceiver {
 extension DataChannelReceiver: RoomDelegate {
     nonisolated func room(_: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
         // Only process messages from the agent
-        guard let participant else {
+        guard participant != nil else {
             print("[DataChannelReceiver] Received data but no participant, ignoring")
             return
         }

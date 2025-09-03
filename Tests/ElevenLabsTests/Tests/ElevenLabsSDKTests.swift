@@ -1,9 +1,10 @@
-@testable import ElevenLabs
 import XCTest
+
+@testable import ElevenLabs
 
 final class ElevenLabsSDKTests: XCTestCase {
     func testSDKVersionExists() {
-        XCTAssertEqual(ElevenLabs.version, "2.0.11")
+        XCTAssertEqual(ElevenLabs.version, "2.0.12")
         XCTAssertFalse(ElevenLabs.version.isEmpty)
     }
 

@@ -13,7 +13,7 @@ final class ConversationTests: XCTestCase {
         mockTokenService = MockTokenService()
 
         let mockDependencies = Task<Dependencies, Never> {
-            await Dependencies.shared
+            Dependencies.shared
         }
         conversation = Conversation(dependencies: mockDependencies)
     }

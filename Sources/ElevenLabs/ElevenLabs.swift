@@ -20,7 +20,7 @@ import LiveKit
 public enum ElevenLabs {
     // MARK: - Version
 
-    public static let version = "2.0.11"
+    public static let version = "2.0.12"
 
     // MARK: - Configuration
 
@@ -174,7 +174,9 @@ public enum ElevenLabs {
         config: ConversationConfig = .init()
     ) async throws -> Conversation {
         let conversation = createConversation()
-        try await conversation.startConversation(auth: auth, options: config.toConversationOptions())
+        try await conversation.startConversation(
+            auth: auth, options: config.toConversationOptions()
+        )
         return conversation
     }
 
@@ -222,11 +224,12 @@ public extension ElevenLabs {
         public var logLevel: LogLevel
         public var debugMode: Bool
 
-        public init(apiEndpoint: URL? = nil,
-                    websocketUrl: String? = nil,
-                    logLevel: LogLevel = .warning,
-                    debugMode: Bool = false)
-        {
+        public init(
+            apiEndpoint: URL? = nil,
+            websocketUrl: String? = nil,
+            logLevel: LogLevel = .warning,
+            debugMode: Bool = false
+        ) {
             self.apiEndpoint = apiEndpoint
             self.websocketUrl = websocketUrl
             self.logLevel = logLevel

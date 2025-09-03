@@ -182,7 +182,7 @@ private extension ConnectionManager {
             onDisconnected()
         }
 
-        func room(_: Room, didUpdate _: ConnectionState, from _: ConnectionState) { /* unused */ }
+        func room(_: Room, didUpdateConnectionState _: ConnectionState, from _: ConnectionState) { /* unused */ }
 
         // MARK: – Private helpers
 
@@ -275,7 +275,7 @@ private final class DataChannelDelegate: RoomDelegate, @unchecked Sendable {
 
     nonisolated func room(_: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic _: String) {
         // Only process messages from the agent
-        guard let participant else {
+        guard participant != nil else {
             print("[DataChannelReceiver] Received data but no participant, ignoring")
             return
         }
@@ -283,7 +283,7 @@ private final class DataChannelDelegate: RoomDelegate, @unchecked Sendable {
         continuation.yield(data)
     }
 
-    nonisolated func room(_ room: Room, didUpdate connectionState: ConnectionState, from previousState: ConnectionState) {
+    nonisolated func room(_ room: Room, didUpdateConnectionState connectionState: ConnectionState, from previousState: ConnectionState) {
         print("DataChannelDelegate: Connection state changed from \(previousState) to \(connectionState)")
         print("DataChannelDelegate: Remote participants count: \(room.remoteParticipants.count)")
 
@@ -292,16 +292,12 @@ private final class DataChannelDelegate: RoomDelegate, @unchecked Sendable {
         }
     }
 
-    nonisolated func room(_: Room, didDisconnectWithError _: Error?) {
-        continuation.finish()
-    }
-
     nonisolated func room(_: Room, participantDidConnect participant: RemoteParticipant) {
-        print("DataChannelDelegate: Remote participant \(participant.identity) connected")
+        print("DataChannelDelegate: Remote participant \(String(describing: participant.identity)) connected")
     }
 
     nonisolated func room(_: Room, participantDidDisconnect participant: RemoteParticipant) {
-        print("DataChannelDelegate: Remote participant \(participant.identity) disconnected")
+        print("DataChannelDelegate: Remote participant \(String(describing: participant.identity)) disconnected")
     }
 }
 
