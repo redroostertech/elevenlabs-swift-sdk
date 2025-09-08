@@ -121,6 +121,18 @@ class ConversationManager: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        
+        // Monitor conversation metadata (includes conversation ID)
+        conversation.$conversationMetadata
+            .compactMap { $0 }
+            .sink { metadata in
+                print("Conversation ID: \(metadata.conversationId)")
+                print("Agent audio format: \(metadata.agentOutputAudioFormat)")
+                if let userFormat = metadata.userInputAudioFormat {
+                    print("User audio format: \(userFormat)")
+                }
+            }
+            .store(in: &cancellables)
     }
 }
 ```
@@ -304,6 +316,31 @@ let isMuted = conversation.isMuted
 // Access audio tracks for advanced use cases
 let inputTrack = conversation.inputTrack
 let agentAudioTrack = conversation.agentAudioTrack
+```
+
+### Accessing Conversation Metadata
+
+The conversation metadata (including conversation ID) is available after the conversation is initialized:
+
+```swift
+// Access conversation metadata directly
+if let metadata = conversation.conversationMetadata {
+    let conversationId = metadata.conversationId
+    let agentAudioFormat = metadata.agentOutputAudioFormat
+    let userAudioFormat = metadata.userInputAudioFormat // Optional
+}
+
+// Or observe it reactively
+conversation.$conversationMetadata
+    .compactMap { $0 }
+    .sink { metadata in
+        // Store or use the conversation ID
+        self.currentConversationId = metadata.conversationId
+        
+        // Log conversation details
+        print("Started conversation: \(metadata.conversationId)")
+    }
+    .store(in: &cancellables)
 ```
 
 ## Architecture

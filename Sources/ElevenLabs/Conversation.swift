@@ -22,6 +22,9 @@ public final class Conversation: ObservableObject, RoomDelegate {
     /// Stream of client tool calls that need to be executed by the app
     @Published public private(set) var pendingToolCalls: [ClientToolCallEvent] = []
 
+    /// Conversation metadata including conversation ID, received when the conversation is initialized
+    @Published public private(set) var conversationMetadata: ConversationMetadataEvent?
+
     // Device lists (optional to expose; keep `internal` if you don't want them public)
     @Published public private(set) var audioDevices: [AudioDevice] = AudioManager.shared
         .inputDevices
@@ -324,6 +327,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
         // Don't reset isMuted - it should reflect actual room state
         agentState = .listening
         pendingToolCalls.removeAll()
+        conversationMetadata = nil
         conversationInitTask?.cancel()
     }
 
@@ -346,6 +350,7 @@ public final class Conversation: ObservableObject, RoomDelegate {
         // Clear conversation state
         messages.removeAll()
         pendingToolCalls.removeAll()
+        conversationMetadata = nil
 
         // Reset agent state
         agentState = .listening
@@ -468,9 +473,9 @@ public final class Conversation: ObservableObject, RoomDelegate {
             speakingTimer?.cancel()
             agentState = .listening
 
-        case .conversationMetadata:
-            // Don't change agent state on metadata
-            break
+        case let .conversationMetadata(metadata):
+            // Store the conversation metadata for public access
+            conversationMetadata = metadata
 
         case let .ping(p):
             // Respond to ping with pong
