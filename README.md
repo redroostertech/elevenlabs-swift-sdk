@@ -54,6 +54,16 @@ await conversation.endConversation()
 - Swift 5.9+
 - Add `NSMicrophoneUsageDescription` to your Info.plist
 
+### Local Network Permission
+
+The SDK automatically handles local network permission requests by delaying agent launch until after the permission is resolved. This prevents overlap between the permission dialog and agent initialization:
+
+- **WebRTC Connection**: Establishes connection to ElevenLabs servers (triggers local network permission)
+- **Permission Resolution**: Waits for user to accept/deny local network access
+- **Agent Launch**: Only proceeds with agent initialization after connection is established
+
+This ensures a smooth user experience without permission dialogs appearing during agent startup.
+
 ## Core Features
 
 ### Real-time Conversation Management

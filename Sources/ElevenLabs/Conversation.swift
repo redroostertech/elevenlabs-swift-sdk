@@ -173,36 +173,8 @@ public final class Conversation: ObservableObject, RoomDelegate {
                 }
 
                 print("[ElevenLabs-Timing] Sending conversation init...")
-
-                // Wait for data channel and agent to be fully ready (state-based, not time-based)
-                let isReady = await self.waitForSystemReady()
-                if isReady {
-                    print("[ElevenLabs-Timing] System confirmed ready for conversation init")
-                    // Add buffer based on whether agent was already there (fast path) or just joined
-                    let buffer = await self.determineOptimalBuffer()
-                    if buffer > 0 {
-                        print("[ElevenLabs-Timing] Adding \(Int(buffer))ms buffer for agent conversation handler readiness...")
-                        try? await Task.sleep(nanoseconds: UInt64(buffer * 1_000_000))
-                        print("[ElevenLabs-Timing] Buffer complete, sending conversation init")
-                    } else {
-                        print("[ElevenLabs-Timing] No buffer needed, sending conversation init immediately")
-                    }
-                } else {
-                    print("[ElevenLabs-Timing] ⚠️ System readiness timeout, proceeding anyway")
-                }
-
-                // Cancel any existing init attempt
-                self.conversationInitTask?.cancel()
-                self.conversationInitTask = Task {
-                    await self.sendConversationInitWithRetry(config: options.toConversationConfig())
-                }
-                await self.conversationInitTask?.value
-                print("[ElevenLabs] Conversation init completed")
-
-                // flip to .active once conversation init is sent
-                self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
-                print("[ElevenLabs] State changed to active")
-                print("[ElevenLabs-Timing] Total startup time: \(Date().timeIntervalSince(startTime))s")
+                // Note: Agent launch is now handled in onConnectionEstablished callback
+                // to ensure local network permission is resolved first
             }
         }
 
@@ -213,6 +185,16 @@ public final class Conversation: ObservableObject, RoomDelegate {
                     self.state = .ended(reason: .remoteDisconnected)
                     self.resetFlags()
                 }
+            }
+        }
+        
+        // Set up connection established callback to delay agent launch
+        deps.connectionManager.onConnectionEstablished = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                print("[ElevenLabs-Timing] WebRTC connection established - local network permission resolved")
+                // Now safe to proceed with agent launch
+                await self.proceedWithAgentLaunch(auth: auth, options: options)
             }
         }
 
@@ -231,6 +213,44 @@ public final class Conversation: ObservableObject, RoomDelegate {
         // Wire up streams
         startRoomObservers()
         startProtocolEventLoop()
+        
+        // Note: Agent launch is now handled in onConnectionEstablished callback
+        // to ensure local network permission is resolved first
+    }
+    
+    /// Proceed with agent launch after connection is established
+    private func proceedWithAgentLaunch(auth: ElevenLabsConfiguration, options: ConversationOptions) async {
+        print("[ElevenLabs-Timing] Proceeding with agent launch...")
+        
+        // Wait for system to be ready
+        let systemReady = await waitForSystemReady()
+        if systemReady {
+            print("[ElevenLabs-Timing] System confirmed ready for conversation init")
+            // Add buffer based on whether agent was already there (fast path) or just joined
+            let buffer = await self.determineOptimalBuffer()
+            if buffer > 0 {
+                print("[ElevenLabs-Timing] Adding \(Int(buffer))ms buffer for agent conversation handler readiness...")
+                try? await Task.sleep(nanoseconds: UInt64(buffer * 1_000_000))
+                print("[ElevenLabs-Timing] Buffer complete, sending conversation init")
+            } else {
+                print("[ElevenLabs-Timing] No buffer needed, sending conversation init immediately")
+            }
+        } else {
+            print("[ElevenLabs-Timing] ⚠️ System readiness timeout, proceeding anyway")
+        }
+
+        // Cancel any existing init attempt
+        self.conversationInitTask?.cancel()
+        self.conversationInitTask = Task {
+            await self.sendConversationInitWithRetry(config: options.toConversationConfig())
+        }
+        await self.conversationInitTask?.value
+        print("[ElevenLabs] Conversation init completed")
+
+        // flip to .active once conversation init is sent
+        self.state = .active(.init(agentId: self.extractAgentId(from: auth)))
+        print("[ElevenLabs] State changed to active")
+//        print("[ElevenLabs-Timing] Total startup time: \(Date().timeIntervalSince(startTime))s")
     }
 
     /// Extract agent ID from authentication configuration for state tracking
